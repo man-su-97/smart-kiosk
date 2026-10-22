@@ -54,7 +54,12 @@ docker compose up -d --build     # whole app
 cd e2e && npm install && npx playwright install chromium && npm test
 ```
 
-Covers: product list, order → countdown → paid → pickup (second claim 409), countdown with the browser clock
+From the repo root, `npm run test:e2e` and `npm run test:backend` are shortcuts for the two suites.
+The screen is a 2D kiosk: SVG product illustrations (`ProductIcon.tsx`), green/orange/red stock badges, and a payment
+card with a UPI QR code (`qrcode.react`, link `upi://pay?pa=counter@upi&pn=SnackKiosk&am=<₹>&tr=<orderId>&tn=Order_<orderId>&cu=INR`),
+a countdown badge, and a copyable `send-webhook` command. I did not scan the QR with a phone or decode it.
+
+Covers: product list with illustrations and badges, order → QR + countdown → paid → pickup (second claim 409), countdown with the browser clock
 set 10 minutes ahead, expired hold message + stock released, wrong amount → needs-review message, cart cap.
 The frontend never reads `Date`, so the clock-skew test confirms the countdown is unaffected by it.
 
@@ -118,5 +123,5 @@ Trade-off: a late payer can "win" units that were released, as long as nobody el
 
 ## How I checked it
 
-Automated tests above (real Postgres, 18 tests) plus the manual flow in "Run it" (order → webhook → repeat webhook → two parallel claims returned 200 and 409).
+Automated tests above (real Postgres, 18 tests, 7 browser tests) plus the manual flow in "Run it" (order → webhook → repeat webhook → two parallel claims returned 200 and 409).
 I also checked the tests can fail: removing `FOR UPDATE` from `createOrder` makes the stock tests fail (orders oversold). See `AI_NOTES.md` for the AI usage notes.

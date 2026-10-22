@@ -1,0 +1,8 @@
+{
+  "name": "pickup-counter",
+  "private": true,
+  "scripts": {
+    "test:e2e": "npm --prefix e2e test",
+    "test:backend": "npm --prefix backend test"
+  }
+}

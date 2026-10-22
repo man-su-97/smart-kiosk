@@ -1,13 +1,23 @@
 import { useEffect, useState } from "react";
+import { QRCodeSVG } from "qrcode.react";
 import { fetchOrder, formatRupees, type Order } from "./api";
 import { useCountdown } from "./useCountdown";
 
 const FINISHED = ["paid", "expired", "needs_review", "claimed"];
 
+// UPI deep link. UPI wants rupees (e.g. 45.00), so this is the one place paise
+// is converted, and only for the QR text.
+function upiLink(order: Order) {
+  const rupees = (order.totalPaise / 100).toFixed(2);
+  return `upi://pay?pa=counter@upi&pn=SnackKiosk&am=${rupees}&tr=${order.id}&tn=Order_${order.id}&cu=INR`;
+}
+
 export function PaymentScreen({ firstOrder, onDone }: { firstOrder: Order; onDone: () => void }) {
   const [order, setOrder] = useState(firstOrder);
+  const [copied, setCopied] = useState(false);
   const secondsLeft = useCountdown(order.expiresInSeconds);
   const finished = FINISHED.includes(order.status);
+  const command = `npm run send-webhook -- ${order.id} ${order.totalPaise}`;
 
   // Ask the server for the status every 2 seconds until it is paid / expired / needs_review.
   useEffect(() => {
@@ -18,38 +28,67 @@ export function PaymentScreen({ firstOrder, onDone }: { firstOrder: Order; onDon
     return () => clearInterval(timer);
   }, [order.id, finished]);
 
-  return (
-    <div>
-      <h1>Pay {formatRupees(order.totalPaise)} by UPI</h1>
-      <p>Order <code>{order.id}</code></p>
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(command);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard blocked: the command is still visible to copy by hand */
+    }
+  };
 
+  return (
+    <div className="pay-card">
       {order.status === "pending" && (
         <>
-          <div className="countdown">
-            {Math.floor(secondsLeft / 60)}:{String(secondsLeft % 60).padStart(2, "0")}
+          <h1 className="screen-title">Pay {formatRupees(order.totalPaise)} by UPI</h1>
+          <div className={`timer-badge ${secondsLeft <= 30 ? "urgent" : ""}`}>
+            ⏱ <span className="countdown">{Math.floor(secondsLeft / 60)}:{String(secondsLeft % 60).padStart(2, "0")}</span>
           </div>
-          <p>Waiting for payment… your items are held until the timer ends.</p>
-          <small>
-            Demo: simulate the provider with{" "}
-            <code>npm run send-webhook -- {order.id} {order.totalPaise}</code>
-          </small>
+          <div className="qr-box">
+            <QRCodeSVG value={upiLink(order)} size={220} marginSize={2} />
+          </div>
+          <p className="scan-text">Scan with GPay / PhonePe / Paytm</p>
+          <p>Order <code className="order-id">{order.id}</code></p>
+
+          <div className="demo-box">
+            <small>Testing: pretend to be the payment provider</small>
+            <code className="command">{command}</code>
+            <button onClick={copy}>{copied ? "Copied!" : "Copy command"}</button>
+          </div>
         </>
       )}
+
       {order.status === "paid" && (
-        <div className="msg ok">Payment received! Go to the locker to collect your order.</div>
-      )}
-      {order.status === "expired" && (
-        <div className="msg bad">Time ran out and your items were released. Please start a new order.</div>
-      )}
-      {order.status === "needs_review" && (
-        <div className="msg warn">
-          We got your payment but could not confirm it automatically. Please ask staff for help
-          (order id above).
+        <div className="result ok">
+          <div className="result-icon">✔</div>
+          <h1>Payment Received</h1>
+          <p>Locker Unlocked — go and collect your order.</p>
         </div>
       )}
-      {order.status === "claimed" && <div className="msg ok">This order has already been collected.</div>}
+      {order.status === "expired" && (
+        <div className="result bad">
+          <div className="result-icon">⌛</div>
+          <h1>Time ran out</h1>
+          <p>Your items were released. Please start a new order.</p>
+        </div>
+      )}
+      {order.status === "needs_review" && (
+        <div className="result warn">
+          <div className="result-icon">!</div>
+          <h1>Please ask staff</h1>
+          <p>We got your payment but could not confirm it automatically. Show this order id: <code>{order.id}</code></p>
+        </div>
+      )}
+      {order.status === "claimed" && (
+        <div className="result ok">
+          <div className="result-icon">✔</div>
+          <h1>Already collected</h1>
+        </div>
+      )}
 
-      {finished && <button onClick={onDone}>Back to shop</button>}
+      {finished && <button className="primary" onClick={onDone}>Back to shop</button>}
     </div>
   );
 }

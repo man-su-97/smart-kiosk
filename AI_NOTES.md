@@ -25,5 +25,9 @@ lock is visible in the SQL, which is what I need to be able to explain live.
    screen check. It loaded with empty instructions and no browser tools (the Playwright MCP server was down), so
    I used the Playwright library directly instead and looked at the screenshots myself. Browser tests in `e2e/`
    were written the same way.
-4. Smaller: the first draft typed transaction parameters with an unreadable `Parameters<Parameters<…>>` expression;
+4. **Wrong product illustration.** In the kiosk redesign, my icon picker matched names with a loose regex, so
+   "Chocolate Bar" matched `cola` and showed the coffee cup. Tests passed (they only counted icons); I caught it by
+   looking at the screenshot. Fixed with whole-word matching, and added a test that the chocolate icon contains
+   "CHOCO". The same screenshots also showed the timer sitting beside the QR code and the command wrapping mid-number.
+5. Smaller: the first draft typed transaction parameters with an unreadable `Parameters<Parameters<…>>` expression;
    replaced with a plain `Tx` type.
