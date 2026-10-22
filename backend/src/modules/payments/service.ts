@@ -1,0 +1,88 @@
+import { withTransaction, type Tx } from "../../db/db.js";
+import { getHeldUnits } from "../products/service.js";
+
+export type WebhookEvent = {
+  eventId: string;
+  orderId: string;
+  amountPaise: number;
+  status: string;
+};
+
+export type WebhookResult =
+  | "duplicate"
+  | "order_not_found"
+  | "ignored"
+  | "already_paid"
+  | "paid"
+  | "needs_review";
+
+export async function processWebhook(event: WebhookEvent): Promise<WebhookResult> {
+  return withTransaction(async (tx) => {
+    // Idempotency: record the event id first. If it already exists, a previous
+    // call handled it, so do nothing. If two copies arrive at once, the second
+    // INSERT waits for the first to commit and then also inserts nothing.
+    const inserted = await tx.query(
+      `INSERT INTO payment_events (event_id, order_id, status, amount_paise)
+       VALUES ($1, $2, $3, $4) ON CONFLICT (event_id) DO NOTHING`,
+      [event.eventId, event.orderId, event.status, event.amountPaise],
+    );
+    if (inserted.rowCount === 0) return "duplicate";
+
+    // Lock the order so a webhook and a pickup (or two webhooks) cannot interleave.
+    const { rows } = await tx.query(
+      `SELECT id, status, total_paise, expires_at <= clock_timestamp() AS past_deadline
+         FROM orders WHERE id = $1 FOR UPDATE`,
+      [event.orderId],
+    );
+    if (rows.length === 0) return "order_not_found";
+    const order = rows[0];
+
+    if (event.status !== "captured") return "ignored";
+    if (order.status === "paid" || order.status === "claimed") return "already_paid";
+    if (order.status === "needs_review") return "ignored";
+
+    // Wrong amount: do not trust it, a person must look.
+    if (event.amountPaise !== order.total_paise) {
+      await markNeedsReview(tx, order.id, "AMOUNT_MISMATCH");
+      return "needs_review";
+    }
+
+    const expired = order.status === "expired" || order.past_deadline;
+    if (expired && !(await canStillFulfil(tx, order.id))) {
+      // Money arrived but the units were sold to someone else meanwhile.
+      await markNeedsReview(tx, order.id, "LATE_PAYMENT_STOCK_GONE");
+      return "needs_review";
+    }
+
+    // Normal payment, or a late payment where the units are still free.
+    await tx.query("UPDATE orders SET status = 'paid', paid_at = now() WHERE id = $1", [order.id]);
+    return "paid";
+  });
+}
+
+async function markNeedsReview(tx: Tx, id: string, reason: string) {
+  await tx.query("UPDATE orders SET status = 'needs_review', review_reason = $2 WHERE id = $1", [
+    id,
+    reason,
+  ]);
+}
+
+// For a late payment: are the units still free? Lock the products first, the same
+// way createOrder does, so nobody can grab them while we check.
+async function canStillFulfil(tx: Tx, orderId: string) {
+  const { rows: items } = await tx.query(
+    "SELECT product_id, quantity FROM order_items WHERE order_id = $1 ORDER BY product_id",
+    [orderId],
+  );
+  const ids = items.map((i) => i.product_id as number);
+  const { rows: products } = await tx.query(
+    "SELECT id, stock FROM products WHERE id = ANY($1) ORDER BY id FOR UPDATE",
+    [ids],
+  );
+  // This order is expired/pending-past-deadline, so it is not counted in `held`.
+  const held = await getHeldUnits(tx, ids);
+  return items.every((item) => {
+    const stock = products.find((p) => p.id === item.product_id)!.stock as number;
+    return stock - (held.get(item.product_id) ?? 0) >= item.quantity;
+  });
+}

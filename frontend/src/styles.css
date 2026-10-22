@@ -1,0 +1,12 @@
+body { font-family: system-ui, sans-serif; max-width: 640px; margin: 24px auto; padding: 0 16px; }
+.row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #ddd; }
+.qty button { width: 32px; height: 32px; }
+.qty span { display: inline-block; width: 32px; text-align: center; }
+.total { font-weight: bold; margin: 16px 0; }
+.error { color: #b00020; }
+.countdown { font-size: 48px; font-weight: bold; }
+.msg { padding: 12px; border-radius: 6px; margin: 12px 0; }
+.ok { background: #e3f6e8; }
+.warn { background: #fff4d6; }
+.bad { background: #fde4e4; }
+code { background: #f3f3f3; padding: 2px 4px; word-break: break-all; }

@@ -1,0 +1,36 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: pickup
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./db/init-test-db.sql:/docker-entrypoint-initdb.d/init-test-db.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pickup"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@db:5432/pickup
+      WEBHOOK_SECRET: dev-webhook-secret
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build: ./frontend
+    environment:
+      API_TARGET: http://api:3000
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
