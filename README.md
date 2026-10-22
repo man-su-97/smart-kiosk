@@ -1,12 +1,7 @@
-
 # Pickup Counter
 
-A self-service snack counter: pick items, pay by UPI (simulated) or cash (operator-approved), collect from a locker.
-TypeScript everywhere. Express + raw `pg` (no ORM), PostgreSQL 16, React (Vite) + Tailwind CSS v4.
-
-Styling: Tailwind utility classes in the components. `frontend/src/styles.css` holds only the design tokens (`@theme`:
-colours, shadow, animations), three shared classes (`btn`, `btn-primary`/`btn-ghost`, `card`) and the keyframes.
-A few plain class names in the markup (`badge`, `countdown`, `qr-box`, `locker-bag`, …) are markers the browser tests use.
+A self-service snack counter: pick items, pay by UPI (simulated), collect from a locker.
+TypeScript throughout: Express + raw `pg` (no ORM), PostgreSQL 16, React (Vite) + Tailwind CSS.
 
 ## Run it
 
@@ -15,209 +10,108 @@ docker compose up --build
 ```
 
 - Customer screen: http://localhost:5173
-- Operator dashboard: http://localhost:5173/admin (token: `demo-admin-token`, from `ADMIN_TOKEN` in docker-compose)
-- Mock UPI page (what the QR opens on a phone): http://localhost:5173/mock-pay?orderId=<id>
 - API: http://localhost:3000
 
-| Endpoint | Purpose |
-|---|---|
-| `GET /products` | products with `available` units |
-| `POST /orders`, `GET /orders/:id` | place an order (holds stock 120 s) / poll its status |
-| `POST /payments/webhook` | the payment provider's signed webhook (HMAC) |
-| `POST /orders/:id/pickup-claim` | locker claims a paid order (exactly one wins) |
-| `POST /orders/:id/cash-request` | customer chose cash → `pending_cash_approval` |
-| `GET /admin/cash-requests`, `POST /admin/orders/:id/approve-cash` / `reject-cash` | operator, needs `X-Admin-Token` |
-| `POST /payments/mock-success` | demo UPI payment, only when `ENABLE_PAYMENT_SIMULATOR=true` |
+Try the flow:
 
-To scan the QR with a real phone, open the kiosk via your computer's LAN address (e.g. `http://192.168.1.20:5173`) so the
-link in the QR is reachable from the phone. With `localhost` the QR points at the phone itself.
-
-Try the whole flow:
-
-1. Open the screen, add items, press **Place order**.
-2. Simulate the payment provider (the order id and amount are shown on the payment screen):
+1. On the screen, add items, open the cart, press **Place order**. The payment screen shows a countdown.
+2. Pay by sending a signed webhook, as the provider would (order id and amount are on the payment screen):
    ```bash
-   cd backend && npm install   # once, if you are not running inside Docker
-   npm run send-webhook -- <orderId> <amountPaise>
+   cd backend && npm install            # once
+   npm run send-webhook -- <orderId> <amountPaise> [eventId] [status]
    ```
-   The screen flips to "Payment received". Sending the same command with the same `eventId`
-   (3rd argument) again changes nothing.
-3. Pick up from the "locker": `curl -X POST localhost:3000/orders/<orderId>/pickup-claim`
-   (a second call returns 409).
+   The screen switches to "Payment Received". Repeating it with the same `eventId` changes nothing.
+   The screen also has a **Simulate UPI Payment Success** button for the same thing.
+3. Collect from the "locker": `curl -X POST localhost:3000/orders/<orderId>/pickup-claim` (a second call returns 409).
 
-`send-webhook` usage: `npm run send-webhook -- <orderId> <amountPaise> [eventId] [status]`.
-The signing secret is `WEBHOOK_SECRET` (default `dev-webhook-secret`, same as in docker-compose).
+The webhook secret is `WEBHOOK_SECRET` (`dev-webhook-secret` in `docker-compose.yml`).
 
 ## Run the tests
 
-Tests use a **real PostgreSQL** database (`pickup_test`, created automatically by `docker compose`).
+Backend tests run against a **real PostgreSQL** database (`pickup_test`, created by `docker compose`):
 
 ```bash
 docker compose up -d db
 cd backend && npm install && npm test
 ```
 
-Set `TEST_DATABASE_URL` to use a different database. What they prove:
-
-| Test file | What it proves |
+| File | Proves |
 |---|---|
-| `orders.test.ts` | 10 simultaneous buyers for the last 2 units → exactly 2 succeed, 8 get 409, `available` ends at 0. A too-large order holds nothing. Expired hold frees stock. A repeated-race test (20 buyers × 15 rounds) fails if the row lock is removed. |
-| `webhook.test.ts` | Bad signature → 401. Same event twice (and 5× at once) → processed once. Wrong amount → `needs_review`. Late payment cases. Out-of-range amount / 200-char event id / unknown status → 400 with nothing written. |
-| `pickup.test.ts` | 2 (and 10) simultaneous claims → exactly one 200, the rest 409, stock reduced once. Unpaid/expired → 409. |
-| `cash-and-mock-upi.test.ts` | Mock UPI pays once and is 404 when the simulator is off. Cash request keeps the hold; admin needs the token; approve → paid (two operators at once → paid once); reject → cancelled and stock released; a payment for a cancelled order re-checks stock (never oversells). |
-| `hardening.test.ts` | Webhook at the deadline waits for an in-flight product lock and then decides (forced with a real lock, not timing luck). A connection killed mid-transaction surfaces the real error and the pool keeps working. The pool has an error listener. |
+| `orders.test.ts` | 10 customers order the last 2 units at once → exactly 2 succeed, 8 get 409, nothing over-held. Repeated 20-buyer races. Too-large order holds nothing. Expired hold frees stock. |
+| `webhook.test.ts` | Same event twice (and 5× at once) → processed once. Bad signature → 401. Wrong amount → `needs_review`. Late payments. Out-of-range payloads → 400. |
+| `pickup.test.ts` | 2 (and 10) simultaneous claims → exactly one 200, the rest 409, stock reduced once. Unpaid / expired → 409. |
+| `hardening.test.ts` | A webhook at the 120 s deadline cannot sell a unit twice. A connection killed mid-transaction does not crash the API. |
+| `cash-and-mock-upi.test.ts` | The optional cash / mock-UPI payment paths (see "Beyond the brief"). |
 
-### Browser (end-to-end) tests
-
-Playwright drives the real screen against the running stack (webhooks are signed by the test itself):
+Browser tests (Playwright) drive the real screen; start the app first. They reset orders and stock in the app's database.
 
 ```bash
-docker compose up -d --build     # whole app
+docker compose up -d --build
 cd e2e && npm install && npx playwright install chromium && npm test
 ```
 
-From the repo root, `npm run test:e2e` and `npm run test:backend` are shortcuts for the two suites.
-**Note:** the e2e run first resets orders and stock in the running app's database (`e2e/global-setup.ts`), because the tests
-buy and pick up real stock. Do not point it at data you care about.
+## How correctness is kept
 
-### The screen
-
-- **Choose:** product cards with SVG illustrations (`ProductIcon.tsx`) and green/orange/red stock badges. Adding an item shows an
-  "added" toast and bumps a floating cart pill; the pill opens a cart drawer (`CartDrawer.tsx`) to review and edit the cart.
-- **Pay:** order summary + a countdown badge, and a UPI / Cash toggle.
-  - **UPI:** a QR (`qrcode.react`) linking to our own **mock UPI page** (`/mock-pay?orderId=…`, `MockPayPage.tsx`), plus a
-    **Simulate UPI Payment Success** button and the copyable `send-webhook` command for testing without a phone.
-  - **Cash:** "Pay with Cash" moves the order to `pending_cash_approval`; the kiosk shows "please pay at the counter,
-    awaiting operator approval" until the operator approves or rejects on `/admin` (`AdminPage.tsx`).
-- **Collect:** once paid, a CSS-only animation opens the locker door and slides the order out (`LockerAnimation.tsx`).
-- `prefers-reduced-motion` turns the animations off.
-
-### Payment simulation and cash approval (decisions to be aware of)
-
-- **Why the QR is not a real `upi://` link:** a real link opens GPay/PhonePe, which need a real merchant and PIN and can never
-  call back to a demo server. So the QR opens a mock UPI page; its button calls `POST /payments/mock-success`.
-- **One payment path:** mock UPI and approved cash both become a normal captured event for the order's full total
-  (`payInternally` → `processWebhook`): same row lock, same idempotency (event id `mockupi_<order>` / `cash_<order>`), same
-  late-payment rule. The amount always comes from the database; the QR link carries only the order id.
-- **Not an open door:** `/payments/mock-success` only works when `ENABLE_PAYMENT_SIMULATOR=true` (demo and tests; 404
-  otherwise). Admin endpoints need `X-Admin-Token`, compared in constant time; the kiosk never knows it.
-- **Cash keeps the same 120 s hold.** An unpaid hold should not last forever. If the operator approves after it ran out,
-  the late-payment rule decides (paid if units are still free, otherwise `needs_review`).
-- **Reject = `cancelled`**, which releases the units. If money then still arrives (e.g. by UPI), the stock is re-checked
-  exactly like a late payment, so a cancelled order can never oversell.
-- New statuses: `pending_cash_approval` (counts as held while inside the window) and `cancelled` (not held).
-
-### Browser tests cover
-
-Product list with illustrations and badges; toast, cart pill and drawer editing; order → QR + countdown → paid → locker
-animation → pickup (second claim 409); mock UPI page on a second "phone" tab; the Simulate button; cash → operator approves on `/admin` → locker; cash rejected →
-declined + stock back; wrong admin token refused; countdown with the browser clock set 10 minutes ahead; expired hold
-message + stock released; wrong amount → needs-review message; cart cap. The frontend never reads `Date`, so the clock-skew
-test confirms the countdown is unaffected by it.
-
-## How it works (the important parts)
-
-**Stock.** `products.stock` is what is physically in the machine; it only goes down at pickup.
-`available = stock − held`, where *held* = units in unpaid orders still inside their 120 s
-window + units in paid orders not yet picked up (`getHeldUnits` in `modules/products/service.ts`).
-Nothing is "released" by a job: an expired order simply stops matching the `expires_at > clock_timestamp()` filter.
-A small job (every 5 s) also writes `status = 'expired'` so the table looks right.
-
-**No overselling.** `createOrder` runs in one transaction: `SELECT … FROM products WHERE id = ANY(…) ORDER BY id FOR UPDATE`
-locks the product rows, then counts held units, then inserts. A competing buyer waits on the lock and
-afterwards sees our hold. Ids are sorted so two transactions never lock in opposite order (no deadlock).
-If anything is short we throw and the transaction rolls back, so nothing is held.
-
-**Webhook.** The route uses `express.raw` so the HMAC-SHA256 is checked on the exact bytes received,
-compared with `crypto.timingSafeEqual`. Idempotency: the first thing the transaction does is
-`INSERT INTO payment_events (event_id …) ON CONFLICT DO NOTHING`; zero rows inserted means "seen before" → do nothing.
-Two copies arriving at the same instant are serialised by the primary key. The order row is then locked with `FOR UPDATE`.
-Wrong amount → `needs_review`.
-
-**Pickup.** `UPDATE orders SET status='claimed' WHERE id=$1 AND status='paid'`. Postgres lets only one
-transaction change the row; the other re-checks, matches 0 rows, and gets 409. Stock is decremented in the same transaction.
-
-**Countdown / wrong clocks.** The server returns `expiresInSeconds` computed with the *database* clock when the
-response is built. The browser counts that number down with `performance.now()` (elapsed time, independent of the
-wall-clock setting) in `frontend/src/useCountdown.ts`. Each poll (every 2 s) restarts it with a fresh server value.
-The browser's date/time is never read. Small error: network delay (a fraction of a second) is not subtracted.
-
-## Production Hardening & Concurrency Fixes
-
-Found by an adversarial review of this code; each fix has a test that fails without it.
-
-**1. Webhook deadline race (stock sold twice at 120 s).**
-`createOrder` decides whether another order's hold has expired *while holding the product row locks*. The webhook used
-to check the deadline *without* them: it could see "still valid" at 119.999 s, then a new order locks the products at
-120.001 s, counts our order as expired and takes the units, and the webhook commits "paid", so one unit is sold twice.
-Now `processWebhook` locks the order's products (`SELECT … FROM products WHERE id = ANY(…) ORDER BY id FOR UPDATE`)
-**before** reading the clock, so the two decisions are serialised by the same locks. Lock order is always
-order → products (like `claimPickup`), and `createOrder` only locks products, so there is no deadlock cycle.
-`hardening.test.ts` reproduces the interleaving with a real held lock; against the old code it fails.
-
-**2. PostgreSQL pool resilience (API crashed on a database restart).**
-Reproduced: `docker compose restart db` killed the API (`Emitted 'error' event on BoundPool`, exit 1).
-- `pool.on("error", …)` logs errors from idle connections instead of letting Node treat them as fatal.
-- `withTransaction` also listens on the checked-out client while it is in use. The test above found that a connection
-  dying *between two queries* of a transaction emits `error` on the client itself and crashed the process the same way.
-- If the socket is dead, `ROLLBACK` fails too. That failure is swallowed so the caller sees the real error, and
-  `client.release(true)` destroys the client instead of handing a dead socket to the next request.
-  (Postgres rolls back an unfinished transaction on disconnect anyway, so nothing half-done is kept.)
-
-**3. Input sanitisation and Zod bounds (500 errors forever on odd webhooks).**
-Reproduced: `amountPaise: 3000000000` passed `z.number().int()` but overflowed the `INTEGER` column, so every retry got a 500.
-The webhook schema now matches the columns: `amountPaise` int 0…2,147,483,647, `eventId` 1–128 chars,
-`orderId` uuid, `status` one of `captured | failed | pending | refunded`. Validation runs after the signature check,
-so a bad payload is a 400 and nothing is written. Note: an unknown status is now a 400 (before it was recorded and ignored).
-
-**4. Self-healing container.**
-`api` has `restart: unless-stopped` in `docker-compose.yml`. Checked by killing the Node process inside the container:
-Docker restarted it and the API served again. With fix 2 the API no longer exits on a database restart at all;
-this is the safety net for anything else.
+- **Stock.** `products.stock` only drops at pickup. `available = stock − held`, where *held* = unpaid orders still inside
+  their 120 s window + paid orders not yet collected (`getHeldUnits`). An expired hold simply stops counting; a 5 s job
+  also writes `status = 'expired'`.
+- **No overselling.** `createOrder` is one transaction: `SELECT … FROM products WHERE id = ANY($1) ORDER BY id FOR UPDATE`,
+  count held units, insert. Competing buyers wait on the row lock and then see the new hold. Ids are sorted, so no deadlocks.
+  Not enough stock → throw → rollback → nothing held, 409 `INSUFFICIENT_STOCK`.
+- **Webhook.** HMAC-SHA256 checked on the raw body with `crypto.timingSafeEqual`. Idempotency: the transaction starts with
+  `INSERT INTO payment_events (event_id …) ON CONFLICT DO NOTHING`; 0 rows → already processed → no change. The order row
+  and its products are locked **before** the deadline is read, so a payment at 119.999 s cannot race a new order at 120.001 s.
+- **Pickup.** `UPDATE orders SET status = 'claimed' WHERE id = $1 AND status = 'paid'`: only one caller can match the row,
+  the other gets 409. Stock is decremented in the same transaction.
+- **Countdown with a wrong clock.** The server sends `expiresInSeconds` measured with the database clock. The browser counts
+  it down with `performance.now()` (elapsed time, unaffected by the clock setting) and re-syncs on every 2 s poll. It never reads the date.
+- **Resilience.** The DB pool and in-use clients have error listeners (a database restart used to crash the API), a dead
+  connection is destroyed instead of reused, and the API container has `restart: unless-stopped`.
 
 ## Decision: payment arrives after the hold expired
 
-Chosen behaviour: **re-check the stock at that moment.**
+**Re-check the stock at that moment.**
+- Units still free → accept, order becomes `paid`. The customer really paid and nobody loses out.
+- Units already taken → `needs_review` (`LATE_PAYMENT_STOCK_GONE`); never oversell, a person refunds.
 
-- Units are still free → accept the payment, order becomes `paid`. The customer really paid and nobody was harmed, so we honour it.
-- Units were taken by someone else → order becomes `needs_review` (`review_reason = LATE_PAYMENT_STOCK_GONE`).
-  We never oversell; the money is flagged for a human to refund.
+Refusing a payment we could fulfil is a bad customer outcome; fulfilling one we cannot breaks "never sold twice".
+This avoids both. Trade-off: a late payer can still get released units if nobody bought them yet.
 
-Why: automatically refusing a real payment that we could fulfil is a bad customer outcome, and
-fulfilling one we cannot would break the "never sold twice" rule. This is the choice that avoids both.
-Trade-off: a late payer can "win" units that were released, as long as nobody else bought them yet.
+## Assumptions
 
-## Other decisions and assumptions
+- *Available* also subtracts **paid orders not yet picked up**, not only unpaid holds: stock only drops at pickup, so a
+  paid-but-uncollected unit must not be sold again.
+- Money is integer paise everywhere; rupees appear only on screen. Totals come from database prices, never the client.
+- `POST /orders` accepts `{ "items": [...] }` or a bare array; duplicate lines are merged.
+- A valid signed webhook gets 200 even when repeated, for an unknown order, or for `failed` / `pending` / `refunded`
+  (recorded, no change). Malformed or out-of-range fields → 400.
+- Pickup: unknown order → 404; unpaid, expired, needs_review or already claimed → 409.
+- One API instance, no authentication for the kiosk or locker, no refund flow. The frontend runs on the Vite dev server
+  (proxy `/api` → API) to keep `docker compose up` simple.
 
-- Money: integer paise only; the UI formats rupees at the very last step. Totals are computed on the server from DB prices.
-- `POST /orders` accepts `{ "items": [{productId, quantity}] }` or a bare array. Duplicate product lines are merged.
-- Stock errors return **409** `INSUFFICIENT_STOCK` with per-product `requested`/`available`.
-- A valid signed webhook always returns 200, including repeats, so a real provider would stop retrying.
-  Unknown order ids are recorded and ignored. `failed` / `pending` / `refunded` are recorded and ignored (no refunds);
-  any other status, or an out-of-range field, is a 400.
-- Pickup: unknown order → 404; unpaid / expired / needs_review / already claimed → 409.
-- No authentication on the locker endpoint, no refunds, a single API instance (the expiry job is per instance, but harmless if repeated).
-- The web container runs the Vite dev server with a proxy (`/api` → API) to keep the setup simple.
+## Beyond the brief (optional extras)
+
+Added after the core was done; the core does not depend on them.
+- Kiosk UI: product illustrations, stock badges, cart drawer, locker-opening animation.
+- UPI QR that opens a demo payment page (`/mock-pay`), and the on-screen Simulate button. Both go through the same
+  payment code as the webhook. Only enabled with `ENABLE_PAYMENT_SIMULATOR=true` (on in `docker-compose.yml`).
+- Cash: the customer chooses cash, the order waits as `pending_cash_approval`, and an operator approves or rejects it on
+  `/admin` (token `demo-admin-token`). Rejected orders become `cancelled` and release their stock.
 
 ## What I would do next
 
-- A refund/resolution flow and an admin view for `needs_review` orders.
-- Authenticate lockers; rate-limit and log webhook failures.
-- Run the same concurrency tests against more parallel API instances.
-- Build the frontend for production (static files) instead of the dev server.
-- Component tests for the countdown (fake timers, shifted system clock).
-- Remaining review findings, not fixed yet:
-  - a cash approval after the hold expired is refused (the order leaves `/admin` at expiry), so late cash has no path
-  - approve and reject can race, because `approveCash` checks the status outside the lock
-  - a second payment for an already-paid order is kept without being flagged for refund
-  - no rate limit on `POST /orders` (stock can be held by a script), and the 50-per-line cap can be bypassed by repeating a line
-  - no connection, statement or lock timeouts
-  - secrets fall back to dev defaults if env vars are missing
-  - Postgres port published on all interfaces
+- Refund / resolution screen for `needs_review` orders, and flag a second payment for an already-paid order.
+- Let an operator approve cash that arrives just after the hold expired (today it is refused), and do the approve/reject
+  status check inside the lock.
+- Rate-limit `POST /orders` (a script can keep stock held) and cap total quantity per product after merging lines.
+- Database timeouts (connection, statement, lock); require real secrets in production instead of dev defaults.
+- Production frontend build, authentication for lockers, and tests with several API instances.
 
 ## How I checked it
 
-Automated tests above (real Postgres, 31 tests, 13 browser tests) plus the manual flow in "Run it" (order → webhook → repeat webhook → two parallel claims returned 200 and 409).
-I also checked the tests can fail: removing `FOR UPDATE` from `createOrder` makes the stock tests fail (orders oversold),
-and the deadline-race test fails against the previous `processWebhook`. `docker compose restart db` now leaves the API up
-and serving (it used to crash). See `AI_NOTES.md` for the AI usage notes.
+- 31 backend tests and 13 browser tests pass, also from a fresh `docker compose down -v && docker compose up --build`.
+- The tests can fail: removing `FOR UPDATE` from `createOrder` makes the race tests fail (9 orders for 2 units), and
+  the deadline test fails against the earlier webhook code.
+- Manually: order → webhook → same webhook again (no change) → two parallel pickup claims (200 and 409);
+  `docker compose restart db` leaves the API serving.
+- How AI tools were used: see `AI_NOTES.md`.
