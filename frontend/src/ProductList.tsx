@@ -1,16 +1,25 @@
 import { useEffect, useState } from "react";
 import { fetchProducts, formatRupees, placeOrder, type CartLine, type Order, type Product } from "./api";
-import { ProductIcon, kindOf } from "./ProductIcon";
+import { KIND_BG, ProductIcon, kindOf } from "./ProductIcon";
 import { AddedToast, CartDrawer, CartPill } from "./CartDrawer";
 import { Stepper } from "./Stepper";
 
 const LOW_STOCK = 3;
 
 // Green = plenty, orange = running low, red = none left.
+// ("badge green/orange/red" are plain marker names the browser tests look for.)
 function StockBadge({ available }: { available: number }) {
-  if (available === 0) return <span className="badge red">Sold out</span>;
-  if (available <= LOW_STOCK) return <span className="badge orange">Only {available} left</span>;
-  return <span className="badge green">{available} in stock</span>;
+  const [marker, color, text] =
+    available === 0
+      ? ["red", "bg-bad", "Sold out"]
+      : available <= LOW_STOCK
+        ? ["orange", "bg-warn", `Only ${available} left`]
+        : ["green", "bg-ok", `${available} in stock`];
+  return (
+    <span className={`badge ${marker} absolute top-6 left-6 z-10 rounded-full px-2.5 py-1 text-xs font-bold text-white ${color}`}>
+      {text}
+    </span>
+  );
 }
 
 export function ProductList({ onOrderPlaced }: { onOrderPlaced: (order: Order, lines: CartLine[]) => void }) {
@@ -70,24 +79,43 @@ export function ProductList({ onOrderPlaced }: { onOrderPlaced: (order: Order, l
   return (
     <>
       <Stepper step={1} />
-      <h1 className="screen-title">What would you like?</h1>
-      <p className="muted">Tap + to add a snack. Pay on the next screen with UPI or cash.</p>
+      <h1 className="mt-2 mb-1 text-3xl font-extrabold tracking-tight">What would you like?</h1>
+      <p className="text-muted">Tap + to add a snack. Pay on the next screen with UPI or cash.</p>
 
-      <div className="grid">
+      <div className="mt-5 grid grid-cols-[repeat(auto-fill,minmax(210px,1fr))] gap-[18px]">
         {products.map((p) => {
           const inCart = cart[p.id] ?? 0;
           return (
-            <div className={`product ${p.available === 0 ? "sold-out" : ""}`} key={p.id} data-testid="product">
+            <div
+              key={p.id}
+              data-testid="product"
+              className={`group relative flex flex-col items-center rounded-3xl bg-white p-4 shadow-card transition
+                hover:-translate-y-1 hover:shadow-[0_16px_36px_rgba(31,33,64,0.14)] ${p.available === 0 ? "opacity-50" : ""}`}
+            >
               <StockBadge available={p.available} />
-              <div className={`icon-wrap kind-${kindOf(p.name)}`}>
-                <ProductIcon name={p.name} />
+              <div className={`mb-3 grid h-[130px] w-full place-items-center rounded-[18px] ${KIND_BG[kindOf(p.name)]}`}>
+                <ProductIcon name={p.name} className="size-24 transition group-hover:scale-110 group-hover:-rotate-3" />
               </div>
-              <div className="product-name">{p.name}</div>
-              <div className="product-price">{formatRupees(p.pricePaise)}</div>
-              <div className="qty">
-                <button aria-label={`Remove ${p.name}`} onClick={() => change(p, -1)} disabled={inCart === 0}>−</button>
-                <span className="qty-value">{inCart}</span>
-                <button aria-label={`Add ${p.name}`} onClick={() => change(p, 1)} disabled={inCart >= p.available}>+</button>
+              <div className="text-center text-[17px] font-bold">{p.name}</div>
+              <div className="mt-0.5 mb-3 text-[19px] font-extrabold text-brand-dark">{formatRupees(p.pricePaise)}</div>
+              <div className="flex items-center gap-3.5">
+                <button
+                  className="btn size-14 rounded-[18px] p-0 text-[28px] font-bold"
+                  aria-label={`Remove ${p.name}`}
+                  onClick={() => change(p, -1)}
+                  disabled={inCart === 0}
+                >
+                  −
+                </button>
+                <span className="qty-value min-w-8 text-center text-2xl font-extrabold">{inCart}</span>
+                <button
+                  className="btn size-14 rounded-[18px] bg-brand p-0 text-[28px] font-bold text-white disabled:bg-soft disabled:text-ink"
+                  aria-label={`Add ${p.name}`}
+                  onClick={() => change(p, 1)}
+                  disabled={inCart >= p.available}
+                >
+                  +
+                </button>
               </div>
             </div>
           );
@@ -107,7 +135,7 @@ export function ProductList({ onOrderPlaced }: { onOrderPlaced: (order: Order, l
           onPlace={submit}
         />
       )}
-      {!cartOpen && error && <p className="error">{error}</p>}
+      {!cartOpen && error && <p className="font-bold text-bad">{error}</p>}
     </>
   );
 }

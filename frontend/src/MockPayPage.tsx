@@ -33,27 +33,31 @@ export function MockPayPage() {
   const payable = order && (order.status === "pending" || order.status === "pending_cash_approval");
 
   return (
-    <div className="phone">
-      <div className="phone-card">
-        <div className="phone-brand">Mock UPI</div>
-        <p className="muted">Demo payment page — no real money moves.</p>
+    <div className="grid min-h-screen place-items-center bg-gradient-to-br from-[#5b4bdb] to-[#2a1f7a] p-4">
+      <div className="w-full max-w-[380px] rounded-[28px] bg-white px-[22px] py-7 text-center shadow-[0_20px_50px_rgba(0,0,0,0.3)]">
+        <div className="text-xl font-extrabold text-[#5b4bdb]">Mock UPI</div>
+        <p className="text-muted">Demo payment page — no real money moves.</p>
         {order && (
           <>
-            <p className="muted">Paying to</p>
-            <h2>Snack Kiosk</h2>
-            <div className="phone-amount">{formatRupees(order.totalPaise)}</div>
-            <p className="muted small-text">Order {order.id.slice(0, 8)}</p>
+            <p className="mt-3 text-muted">Paying to</p>
+            <h2 className="text-2xl font-bold">Snack Kiosk</h2>
+            <div className="my-2 text-[44px] font-extrabold">{formatRupees(order.totalPaise)}</div>
+            <p className="mb-4 text-[13px] text-muted">Order {order.id.slice(0, 8)}</p>
           </>
         )}
 
-        {state === "done" && <div className="phone-ok">✓ Payment approved. Check the kiosk screen.</div>}
-        {state === "error" && <p className="error">{message || "Payment failed"}</p>}
+        {state === "done" && (
+          <div className="animate-pop rounded-2xl bg-[#dcf5e8] p-3.5 font-bold text-[#167a4a]">
+            ✓ Payment approved. Check the kiosk screen.
+          </div>
+        )}
+        {state === "error" && <p className="font-bold text-bad">{message || "Payment failed"}</p>}
         {state !== "done" && payable && (
-          <button className="primary wide" disabled={state === "paying"} onClick={approve}>
+          <button className="btn btn-primary w-full" disabled={state === "paying"} onClick={approve}>
             {state === "paying" ? "Paying…" : "Approve Mock UPI Payment"}
           </button>
         )}
-        {order && !payable && state !== "done" && <p className="muted">This order is {order.status}; nothing to pay.</p>}
+        {order && !payable && state !== "done" && <p className="text-muted">This order is {order.status}; nothing to pay.</p>}
       </div>
     </div>
   );

@@ -2,6 +2,15 @@
 // product type is just one more case. The product name picks which one to show.
 type Kind = "drink" | "chocolate" | "chips" | "cookie" | "peanuts";
 
+// Soft pastel backdrop behind each kind of drawing.
+export const KIND_BG: Record<Kind, string> = {
+  drink: "bg-[#fdeede]",
+  chocolate: "bg-[#f3e5df]",
+  chips: "bg-[#fff3cc]",
+  cookie: "bg-[#fbe7d3]",
+  peanuts: "bg-[#efe6d8]",
+};
+
 export function kindOf(name: string): Kind {
   const n = name.toLowerCase();
   // \b = whole words only, so "chocolate" is not mistaken for "cola".
@@ -12,10 +21,10 @@ export function kindOf(name: string): Kind {
   return "chips"; // chips, nachos and anything else
 }
 
-export function ProductIcon({ name }: { name: string }) {
+export function ProductIcon({ name, className = "size-24" }: { name: string; className?: string }) {
   const kind = kindOf(name);
   return (
-    <svg className="product-icon" viewBox="0 0 100 100" role="img" aria-label={`${name} illustration`}>
+    <svg className={`product-icon ${className}`} viewBox="0 0 100 100" role="img" aria-label={`${name} illustration`}>
       {kind === "drink" && (
         <>
           <rect x="30" y="30" width="40" height="56" rx="8" fill="#6f4e37" />

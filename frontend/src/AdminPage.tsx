@@ -38,41 +38,47 @@ export function AdminPage() {
 
   if (!loggedIn) {
     return (
-      <div className="admin">
-        <h1 className="screen-title">Operator login</h1>
+      <div className="mx-auto max-w-[860px] p-6">
+        <h1 className="mb-4 text-3xl font-extrabold tracking-tight">Operator login</h1>
         <form
-          className="card admin-login"
+          className="card flex max-w-[360px] flex-col gap-3"
           onSubmit={(e) => {
             e.preventDefault();
             setLoggedIn(true);
           }}
         >
-          <label htmlFor="token">Admin token</label>
-          <input id="token" type="password" value={token} onChange={(e) => setToken(e.target.value)} />
-          <button className="primary" type="submit" disabled={!token}>Open dashboard</button>
-          {error && <p className="error">{error}</p>}
+          <label htmlFor="token" className="font-semibold">Admin token</label>
+          <input
+            id="token"
+            type="password"
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            className="rounded-xl border-2 border-line p-3 outline-none focus:border-brand"
+          />
+          <button className="btn btn-primary" type="submit" disabled={!token}>Open dashboard</button>
+          {error && <p className="font-bold text-bad">{error}</p>}
         </form>
       </div>
     );
   }
 
   return (
-    <div className="admin">
-      <h1 className="screen-title">Cash requests</h1>
-      <p className="muted">Take the cash at the counter, then approve. Refreshes every 2 seconds.</p>
-      {error && <p className="error">{error}</p>}
-      {requests.length === 0 && <div className="card muted">No customers waiting to pay cash.</div>}
-      <div className="admin-list">
+    <div className="mx-auto max-w-[860px] p-6">
+      <h1 className="text-3xl font-extrabold tracking-tight">Cash requests</h1>
+      <p className="mb-4 text-muted">Take the cash at the counter, then approve. Refreshes every 2 seconds.</p>
+      {error && <p className="font-bold text-bad">{error}</p>}
+      {requests.length === 0 && <div className="card text-muted">No customers waiting to pay cash.</div>}
+      <div className="flex flex-col gap-3.5">
         {requests.map((r) => (
-          <div className="card admin-request" key={r.id} data-testid="cash-request">
+          <div key={r.id} data-testid="cash-request" className="card flex animate-pop flex-wrap items-center justify-between gap-4">
             <div>
-              <div className="admin-amount">{formatRupees(r.totalPaise)}</div>
-              <div className="muted small-text">Order {r.id.slice(0, 8)} · {r.expiresInSeconds}s left</div>
+              <div className="text-[28px] font-extrabold">{formatRupees(r.totalPaise)}</div>
+              <div className="text-[13px] text-muted">Order {r.id.slice(0, 8)} · {r.expiresInSeconds}s left</div>
               <div>{r.items.map((i) => `${i.quantity} × ${i.name}`).join(", ")}</div>
             </div>
-            <div className="admin-actions">
-              <button className="primary" onClick={() => act(approveCash, r.id)}>Approve Cash Received</button>
-              <button className="ghost" onClick={() => act(rejectCash, r.id)}>Reject</button>
+            <div className="flex gap-2.5">
+              <button className="btn btn-primary" onClick={() => act(approveCash, r.id)}>Approve Cash Received</button>
+              <button className="btn btn-ghost" onClick={() => act(rejectCash, r.id)}>Reject</button>
             </div>
           </div>
         ))}

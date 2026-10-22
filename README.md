@@ -1,7 +1,11 @@
 # Pickup Counter
 
-A self-service snack counter: pick items, pay by UPI (simulated), collect from a locker.
-TypeScript everywhere. Express + raw `pg` (no ORM), PostgreSQL, React (Vite).
+A self-service snack counter: pick items, pay by UPI (simulated) or cash (operator-approved), collect from a locker.
+TypeScript everywhere. Express + raw `pg` (no ORM), PostgreSQL 16, React (Vite) + Tailwind CSS v4.
+
+Styling: Tailwind utility classes in the components. `frontend/src/styles.css` holds only the design tokens (`@theme`:
+colours, shadow, animations), three shared classes (`btn`, `btn-primary`/`btn-ghost`, `card`) and the keyframes.
+A few plain class names in the markup (`badge`, `countdown`, `qr-box`, `locker-bag`, …) are markers the browser tests use.
 
 ## Run it
 
