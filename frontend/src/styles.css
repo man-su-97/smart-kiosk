@@ -50,6 +50,7 @@ h1, h2 { margin: 0; }
 .kind-chocolate { background: #f3e5df; }
 .kind-chips { background: #fff3cc; }
 .kind-cookie { background: #fbe7d3; }
+.kind-peanuts { background: #efe6d8; }
 
 /* Stock badges (top-left of the card) */
 .badge { position: absolute; top: 24px; left: 24px; z-index: 1; color: #fff; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; }

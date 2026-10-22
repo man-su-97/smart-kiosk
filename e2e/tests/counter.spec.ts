@@ -28,6 +28,9 @@ test("shows 5 products, each with an illustration and a stock badge", async ({ p
   // Each product type gets its own drawing (the chocolate wrapper says CHOCO, the drink has a straw).
   await expect(card(page, "Chocolate Bar").locator("svg.product-icon")).toContainText("CHOCO");
   await expect(card(page, "Cold Coffee").locator("svg.product-icon")).not.toContainText("CHOCO");
+  // No two products share the same drawing.
+  const drawings = await page.locator("svg.product-icon").evaluateAll((svgs) => svgs.map((s) => s.innerHTML));
+  expect(new Set(drawings).size).toBe(drawings.length);
 });
 
 test("stock badge colours: green when plenty, orange when low, red when sold out", async ({ page }) => {

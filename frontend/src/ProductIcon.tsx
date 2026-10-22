@@ -1,6 +1,6 @@
 // Small hand-drawn 2D SVG illustrations. Each one is a plain function, so a new
 // product type is just one more case. The product name picks which one to show.
-type Kind = "drink" | "chocolate" | "chips" | "cookie";
+type Kind = "drink" | "chocolate" | "chips" | "cookie" | "peanuts";
 
 export function kindOf(name: string): Kind {
   const n = name.toLowerCase();
@@ -8,7 +8,8 @@ export function kindOf(name: string): Kind {
   if (/\b(coffee|tea|cola|soda|juice|drink)\b/.test(n)) return "drink";
   if (/\b(choc\w*|candy|wafers?)\b/.test(n)) return "chocolate";
   if (/\b(biscuits?|cookies?|bakery)\b/.test(n)) return "cookie";
-  return "chips"; // chips, nachos, peanuts and anything else
+  if (/\b(peanuts?|nuts?|almonds?|cashews?)\b/.test(n)) return "peanuts";
+  return "chips"; // chips, nachos and anything else
 }
 
 export function ProductIcon({ name }: { name: string }) {
@@ -40,6 +41,17 @@ export function ProductIcon({ name }: { name: string }) {
           <path d="M24 24 Q50 34 76 24" stroke="#d98a0b" strokeWidth="4" fill="none" />
           <circle cx="50" cy="55" r="16" fill="#fff4cf" />
           <path d="M42 56 Q50 44 58 56 Q50 66 42 56Z" fill="#f5a623" />
+        </>
+      )}
+      {kind === "peanuts" && (
+        <>
+          <path d="M18 56h64q-2 28-32 28T18 56z" fill="#8d5a3b" />
+          <rect x="14" y="52" width="72" height="9" rx="4.5" fill="#a86f4a" />
+          <g fill="#e6b873" stroke="#b98544" strokeWidth="2">
+            <g transform="rotate(-25 36 42)"><ellipse cx="30" cy="42" rx="9" ry="7" /><ellipse cx="43" cy="42" rx="9" ry="7" /></g>
+            <g transform="rotate(20 62 38)"><ellipse cx="56" cy="38" rx="9" ry="7" /><ellipse cx="69" cy="38" rx="9" ry="7" /></g>
+            <g transform="rotate(-5 50 26)"><ellipse cx="44" cy="26" rx="9" ry="7" /><ellipse cx="57" cy="26" rx="9" ry="7" /></g>
+          </g>
         </>
       )}
       {kind === "cookie" && (
