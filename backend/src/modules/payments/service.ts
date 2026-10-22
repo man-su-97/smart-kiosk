@@ -17,14 +17,15 @@ export type WebhookResult =
   | "paid"
   | "needs_review";
 
-// Simulated cash acceptor: treated exactly like a captured payment for the full order total,
-// so it reuses the same locking, idempotency (one event id per order) and late-payment rules.
-// The amount comes from the database, never from the client.
-export async function payByCash(orderId: string): Promise<WebhookResult> {
+// Payments that do not come from the bank webhook: the mock UPI page ("mockupi") and the
+// operator approving cash ("cash"). They are turned into a normal captured event for the
+// full order total, so they reuse the same locking, idempotency (one event id per order
+// and source) and late-payment rules. The amount comes from the database, never the client.
+export async function payInternally(orderId: string, source: "mockupi" | "cash"): Promise<WebhookResult> {
   const { rows } = await pool.query("SELECT total_paise FROM orders WHERE id = $1", [orderId]);
   if (rows.length === 0) throw new HttpError(404, "ORDER_NOT_FOUND", "Order not found");
   return processWebhook({
-    eventId: `cash_${orderId}`,
+    eventId: `${source}_${orderId}`,
     orderId,
     amountPaise: rows[0].total_paise,
     status: "captured",
@@ -62,8 +63,11 @@ export async function processWebhook(event: WebhookEvent): Promise<WebhookResult
       return "needs_review";
     }
 
-    const expired = order.status === "expired" || order.past_deadline;
-    if (expired && !(await canStillFulfil(tx, order.id))) {
+    // Are this order's units still reserved for it? Only while it is unpaid and inside its
+    // 120 s window. An expired or cancelled order has released them, so re-check the stock.
+    const holdStillValid =
+      (order.status === "pending" || order.status === "pending_cash_approval") && !order.past_deadline;
+    if (!holdStillValid && !(await canStillFulfil(tx, order.id))) {
       // Money arrived but the units were sold to someone else meanwhile.
       await markNeedsReview(tx, order.id, "LATE_PAYMENT_STOCK_GONE");
       return "needs_review";
@@ -94,7 +98,7 @@ async function canStillFulfil(tx: Tx, orderId: string) {
     "SELECT id, stock FROM products WHERE id = ANY($1) ORDER BY id FOR UPDATE",
     [ids],
   );
-  // This order is expired/pending-past-deadline, so it is not counted in `held`.
+  // This order's hold is over (expired or cancelled), so it is not counted in `held`.
   const held = await getHeldUnits(tx, ids);
   return items.every((item) => {
     const stock = products.find((p) => p.id === item.product_id)!.stock as number;

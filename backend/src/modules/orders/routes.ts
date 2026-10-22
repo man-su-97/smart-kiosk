@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { createOrder, getOrder, claimPickup } from "./service.js";
+import { createOrder, getOrder, claimPickup, requestCash } from "./service.js";
 
 export const ordersRouter = Router();
 
@@ -20,6 +20,10 @@ ordersRouter.post("/orders", async (req, res) => {
 
 ordersRouter.get("/orders/:id", async (req, res) => {
   res.json(await getOrder(idSchema.parse(req.params.id)));
+});
+
+ordersRouter.post("/orders/:id/cash-request", async (req, res) => {
+  res.json(await requestCash(idSchema.parse(req.params.id)));
 });
 
 ordersRouter.post("/orders/:id/pickup-claim", async (req, res) => {

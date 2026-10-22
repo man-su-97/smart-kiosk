@@ -33,5 +33,9 @@ lock is visible in the SQL, which is what I need to be able to explain live.
    timed out. Rather than assume the new UI was broken, I checked the stock: earlier runs had left paid-but-unclaimed
    orders, so Chocolate Bar had 0 available and its "+" button was (correctly) disabled. Fix: a global setup that resets
    orders and stock before each run; the suite now passes repeatedly.
-6. Smaller: the first draft typed transaction parameters with an unreadable `Parameters<Parameters<…>>` expression;
+6. **A hole a new status would have opened.** When adding "operator rejects cash → `cancelled`", the existing late-payment
+   check only re-checked stock for orders that were `expired` or past their deadline. A payment arriving for a cancelled
+   order (whose units were already released) would have been marked paid without checking stock, i.e. possibly oversold.
+   Changed it to "re-check unless the hold is still valid", and added a test; with the old line back, that test fails.
+7. Smaller: the first draft typed transaction parameters with an unreadable `Parameters<Parameters<…>>` expression;
    replaced with a plain `Tx` type.

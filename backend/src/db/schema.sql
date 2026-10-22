@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS products (
 
 CREATE TABLE IF NOT EXISTS orders (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  status        TEXT NOT NULL CHECK (status IN ('pending', 'paid', 'expired', 'needs_review', 'claimed')),
+  status        TEXT NOT NULL,
   total_paise   INTEGER NOT NULL CHECK (total_paise > 0),
   expires_at    TIMESTAMPTZ NOT NULL,
   review_reason TEXT,
@@ -18,6 +18,16 @@ CREATE TABLE IF NOT EXISTS orders (
   paid_at       TIMESTAMPTZ,
   claimed_at    TIMESTAMPTZ
 );
+
+-- Allowed statuses. Dropped and re-added on every start so older databases pick up new statuses.
+--   pending               unpaid, stock held for 120 s
+--   pending_cash_approval customer asked to pay cash, waiting for the operator (still held)
+--   paid / claimed        paid / picked up from the locker
+--   expired               hold ran out        cancelled  operator rejected the cash request
+--   needs_review          money arrived but something is wrong, a person must look
+ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_status_check;
+ALTER TABLE orders ADD CONSTRAINT orders_status_check CHECK (status IN
+  ('pending', 'pending_cash_approval', 'paid', 'expired', 'cancelled', 'needs_review', 'claimed'));
 
 CREATE TABLE IF NOT EXISTS order_items (
   order_id         UUID    NOT NULL REFERENCES orders(id),

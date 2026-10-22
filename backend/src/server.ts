@@ -9,7 +9,7 @@ await seed();
 // This only writes the 'expired' status into the table so it is visible there.
 setInterval(() => {
   pool
-    .query("UPDATE orders SET status = 'expired' WHERE status = 'pending' AND expires_at <= clock_timestamp()")
+    .query("UPDATE orders SET status = 'expired' WHERE status IN ('pending', 'pending_cash_approval') AND expires_at <= clock_timestamp()")
     .catch((err) => console.error("expiry job failed", err));
 }, 5000);
 

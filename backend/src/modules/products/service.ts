@@ -1,7 +1,7 @@
 import type { Db } from "../../db/db.js";
 
 // Units that are promised to someone but not yet taken out of `stock`:
-//   - unpaid orders whose 120s hold has not run out yet
+//   - unpaid orders (including ones waiting for cash approval) whose 120s hold has not run out
 //   - paid orders that have not been picked up yet
 // clock_timestamp() is the real current time (now() would be frozen at the
 // start of a transaction). Only the database clock is ever used.
@@ -12,7 +12,7 @@ export async function getHeldUnits(db: Db, productIds: number[]): Promise<Map<nu
        JOIN orders o ON o.id = oi.order_id
       WHERE oi.product_id = ANY($1)
         AND (o.status = 'paid'
-             OR (o.status = 'pending' AND o.expires_at > clock_timestamp()))
+             OR (o.status IN ('pending', 'pending_cash_approval') AND o.expires_at > clock_timestamp()))
       GROUP BY oi.product_id`,
     [productIds],
   );
@@ -33,7 +33,7 @@ export async function listProducts(db: Db) {
            FROM order_items oi
            JOIN orders o ON o.id = oi.order_id
           WHERE o.status = 'paid'
-             OR (o.status = 'pending' AND o.expires_at > clock_timestamp())
+             OR (o.status IN ('pending', 'pending_cash_approval') AND o.expires_at > clock_timestamp())
           GROUP BY oi.product_id
        ) h ON h.product_id = p.id
       ORDER BY p.id`,

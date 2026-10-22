@@ -1,6 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 import { claimPickup, expireOrder, getProducts, sendWebhook } from "./helpers";
 
+const ADMIN_TOKEN = "demo-admin-token"; // matches docker-compose.yml
+
 const card = (page: Page, name: string) => page.getByTestId("product").filter({ hasText: name });
 
 // Chocolate Bar: ₹45.00 (4500 paise). Add 1 to the cart, open the cart, place the order.
@@ -75,7 +77,7 @@ test("order -> UPI QR + countdown -> payment -> locker animation -> pickup", asy
   const orderId = await orderOneChocolateBar(page);
 
   await expect(page.locator(".qr-box svg")).toBeVisible();
-  await expect(page.getByText("Scan with GPay / PhonePe / Paytm")).toBeVisible();
+  await expect(page.getByText("Scan with your phone camera")).toBeVisible();
   await expect(page.locator(".command")).toHaveText(`npm run send-webhook -- ${orderId} 4500`);
   await expect(page.locator(".summary")).toContainText("1 × Chocolate Bar");
 
@@ -95,19 +97,70 @@ test("order -> UPI QR + countdown -> payment -> locker animation -> pickup", asy
   expect((await claimPickup(orderId)).status).toBe(409);
 });
 
-test("pay by cash: choose Cash, simulate the acceptor, locker unlocks, pickup works once", async ({ page }) => {
+test("UPI: the QR opens the mock UPI page; approving it on the 'phone' unlocks the kiosk", async ({ page, context }) => {
   const orderId = await orderOneChocolateBar(page);
 
-  await page.getByRole("tab", { name: /Cash/ }).click();
-  await expect(page.getByTestId("cash-panel")).toContainText("Insert ₹45.00 in the cash slot");
-  await expect(page.locator(".qr-box")).toHaveCount(0);
+  // The phone: a second page opening the same link the QR code holds.
+  const phone = await context.newPage();
+  await phone.goto(`/mock-pay?orderId=${orderId}`);
+  await expect(phone.getByText("₹45.00")).toBeVisible(); // amount read from the server
+  await phone.getByRole("button", { name: "Approve Mock UPI Payment" }).click();
+  await expect(phone.getByText("Payment approved")).toBeVisible();
 
-  await page.getByRole("button", { name: "Simulate cash inserted" }).click();
+  await expect(page.getByRole("heading", { name: "Payment Received" })).toBeVisible({ timeout: 8000 });
+});
+
+test("UPI: the on-screen 'Simulate UPI Payment Success' button pays the order", async ({ page }) => {
+  await orderOneChocolateBar(page);
+  await page.getByRole("button", { name: "Simulate UPI Payment Success" }).click();
+  await expect(page.getByRole("heading", { name: "Payment Received" })).toBeVisible({ timeout: 8000 });
+});
+
+test("cash: customer asks to pay cash, operator approves on /admin, locker unlocks", async ({ page, context }) => {
+  const orderId = await orderOneChocolateBar(page);
+  await page.getByRole("tab", { name: /Cash/ }).click();
+  await page.getByRole("button", { name: "Pay with Cash" }).click();
+  await expect(page.getByTestId("cash-waiting")).toContainText("Awaiting operator approval");
+  await expect(page.getByRole("tab")).toHaveCount(0); // choice made, tabs hidden
+
+  // The operator, in another tab.
+  const admin = await context.newPage();
+  await admin.goto("/admin");
+  await admin.getByLabel("Admin token").fill(ADMIN_TOKEN);
+  await admin.getByRole("button", { name: "Open dashboard" }).click();
+  const request = admin.getByTestId("cash-request").filter({ hasText: orderId.slice(0, 8) });
+  await expect(request).toContainText("₹45.00");
+  await expect(request).toContainText("1 × Chocolate Bar");
+  await request.getByRole("button", { name: "Approve Cash Received" }).click();
+  await expect(request).toHaveCount(0); // gone from the list once paid
+
   await expect(page.getByRole("heading", { name: "Payment Received" })).toBeVisible({ timeout: 8000 });
   await expect(page.locator(".locker-bag")).toHaveCSS("opacity", "1", { timeout: 5000 });
-
   expect((await claimPickup(orderId)).status).toBe(200);
-  expect((await claimPickup(orderId)).status).toBe(409);
+});
+
+test("cash: operator rejects, the kiosk says declined and the stock comes back", async ({ page, context }) => {
+  const before = (await getProducts()).find((p) => p.name === "Chocolate Bar").available;
+  const orderId = await orderOneChocolateBar(page);
+  await page.getByRole("tab", { name: /Cash/ }).click();
+  await page.getByRole("button", { name: "Pay with Cash" }).click();
+
+  const admin = await context.newPage();
+  await admin.goto("/admin");
+  await admin.getByLabel("Admin token").fill(ADMIN_TOKEN);
+  await admin.getByRole("button", { name: "Open dashboard" }).click();
+  await admin.getByTestId("cash-request").filter({ hasText: orderId.slice(0, 8) }).getByRole("button", { name: "Reject" }).click();
+
+  await expect(page.getByRole("heading", { name: "Cash payment declined" })).toBeVisible({ timeout: 8000 });
+  expect((await getProducts()).find((p) => p.name === "Chocolate Bar").available).toBe(before);
+});
+
+test("admin dashboard refuses a wrong token", async ({ page }) => {
+  await page.goto("/admin");
+  await page.getByLabel("Admin token").fill("wrong-token");
+  await page.getByRole("button", { name: "Open dashboard" }).click();
+  await expect(page.getByText("Wrong or missing admin token")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Operator login" })).toBeVisible();
 });
 
 test("countdown is right even when the counter's clock is 10 minutes wrong", async ({ page }) => {

@@ -69,9 +69,9 @@ export async function getOrder(id: string) {
             review_reason AS "reviewReason",
             -- A pending order past its deadline counts as expired, even before
             -- the background job gets around to updating the row.
-            CASE WHEN status = 'pending' AND expires_at <= clock_timestamp()
+            CASE WHEN status IN ('pending', 'pending_cash_approval') AND expires_at <= clock_timestamp()
                  THEN 'expired' ELSE status END AS status,
-            CASE WHEN status = 'pending'
+            CASE WHEN status IN ('pending', 'pending_cash_approval')
                  THEN GREATEST(0, CEIL(EXTRACT(EPOCH FROM (expires_at - clock_timestamp()))))::int
                  ELSE 0 END AS "expiresInSeconds"
        FROM orders WHERE id = $1`,
@@ -79,6 +79,21 @@ export async function getOrder(id: string) {
   );
   if (rows.length === 0) throw new HttpError(404, "ORDER_NOT_FOUND", "Order not found");
   return rows[0];
+}
+
+// Customer chose "Pay with cash". The order keeps its hold and waits for the operator.
+// Only a pending order inside its window can switch; asking twice is harmless.
+export async function requestCash(id: string) {
+  const { rowCount } = await pool.query(
+    `UPDATE orders SET status = 'pending_cash_approval'
+      WHERE id = $1 AND status = 'pending' AND expires_at > clock_timestamp()`,
+    [id],
+  );
+  const order = await getOrder(id); // 404 if it does not exist
+  if (rowCount === 0 && order.status !== "pending_cash_approval") {
+    throw new HttpError(409, "NOT_PENDING", `Order is ${order.status}, cannot pay by cash`);
+  }
+  return order;
 }
 
 export async function claimPickup(id: string) {

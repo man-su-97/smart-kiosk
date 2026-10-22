@@ -1,17 +1,17 @@
 import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { fetchOrder, formatRupees, payCash, type CartLine, type Order } from "./api";
+import { fetchOrder, formatRupees, mockUpiPay, requestCash, type CartLine, type Order } from "./api";
 import { useCountdown } from "./useCountdown";
 import { Stepper } from "./Stepper";
 import { LockerAnimation } from "./LockerAnimation";
 
 const FINISHED = ["paid", "expired", "needs_review", "claimed"];
 
-// UPI deep link. UPI wants rupees (e.g. 45.00), so this is the one place paise
-// is converted, and only for the QR text.
-function upiLink(order: Order) {
-  const rupees = (order.totalPaise / 100).toFixed(2);
-  return `upi://pay?pa=counter@upi&pn=SnackKiosk&am=${rupees}&tr=${order.id}&tn=Order_${order.id}&cu=INR`;
+// The QR opens our own mock UPI page on the phone (a real upi:// link would open GPay,
+// which cannot pay a demo). Only the order id goes in the link; the page reads the
+// amount from the server. Open the kiosk via the computer's LAN IP so a phone can reach it.
+function mockPayLink(order: Order) {
+  return `${window.location.origin}/mock-pay?orderId=${order.id}`;
 }
 
 type Props = { firstOrder: Order; lines: CartLine[]; onDone: () => void };
@@ -20,7 +20,7 @@ export function PaymentScreen({ firstOrder, lines, onDone }: Props) {
   const [order, setOrder] = useState(firstOrder);
   const [method, setMethod] = useState<"upi" | "cash">("upi");
   const [copied, setCopied] = useState(false);
-  const [cashError, setCashError] = useState("");
+  const [actionError, setActionError] = useState("");
   const secondsLeft = useCountdown(order.expiresInSeconds);
   const finished = FINISHED.includes(order.status);
   const command = `npm run send-webhook -- ${order.id} ${order.totalPaise}`;
@@ -44,14 +44,14 @@ export function PaymentScreen({ firstOrder, lines, onDone }: Props) {
     }
   };
 
-  // Demo cash acceptor. The next poll (or this fetch) picks up the new status.
-  const simulateCash = async () => {
-    setCashError("");
+  // Both buttons call the server, then refresh the order right away (no need to wait for the poll).
+  const run = async (action: () => Promise<unknown>) => {
+    setActionError("");
     try {
-      await payCash(order.id);
+      await action();
       setOrder(await fetchOrder(order.id));
     } catch (e) {
-      setCashError((e as Error).message);
+      setActionError((e as Error).message);
     }
   };
 
@@ -67,6 +67,18 @@ export function PaymentScreen({ firstOrder, lines, onDone }: Props) {
           <strong>Locker Unlocked</strong> — collect your order from the locker.
         </p>
         <button className="primary" onClick={onDone}>Done</button>
+      </div>
+    );
+  }
+
+  if (order.status === "cancelled") {
+    return (
+      <div className="result bad">
+        <Stepper step={2} />
+        <div className="result-icon">✕</div>
+        <h1>Cash payment declined</h1>
+        <p>The operator cancelled this order and your items were released.</p>
+        <button className="primary" onClick={onDone}>Back to shop</button>
       </div>
     );
   }
@@ -118,42 +130,50 @@ export function PaymentScreen({ firstOrder, lines, onDone }: Props) {
         {/* Right: how you pay */}
         <section className="card pay-methods">
           <h1 className="screen-title">Pay {formatRupees(order.totalPaise)}</h1>
-          <div className="tabs" role="tablist">
-            <button role="tab" aria-selected={method === "upi"} className={method === "upi" ? "tab active" : "tab"} onClick={() => setMethod("upi")}>
-              📱 UPI
-            </button>
-            <button role="tab" aria-selected={method === "cash"} className={method === "cash" ? "tab active" : "tab"} onClick={() => setMethod("cash")}>
-              💵 Cash
-            </button>
-          </div>
+          {/* Once cash is requested the choice is made, so the tabs go away. */}
+          {order.status === "pending" && (
+            <div className="tabs" role="tablist">
+              <button role="tab" aria-selected={method === "upi"} className={method === "upi" ? "tab active" : "tab"} onClick={() => setMethod("upi")}>
+                📱 UPI
+              </button>
+              <button role="tab" aria-selected={method === "cash"} className={method === "cash" ? "tab active" : "tab"} onClick={() => setMethod("cash")}>
+                💵 Cash
+              </button>
+            </div>
+          )}
 
-          {method === "upi" ? (
+          {order.status === "pending_cash_approval" ? (
+            <div className="method-body" data-testid="cash-waiting">
+              <div className="cash-wait-icon">💵</div>
+              <p className="scan-text">Please pay {formatRupees(order.totalPaise)} in cash at the counter</p>
+              <p className="muted">Awaiting operator approval… this screen updates by itself.</p>
+            </div>
+          ) : method === "upi" ? (
             <div className="method-body">
               <div className="qr-box">
-                <QRCodeSVG value={upiLink(order)} size={200} marginSize={2} />
+                <QRCodeSVG value={mockPayLink(order)} size={200} marginSize={2} />
               </div>
-              <p className="scan-text">Scan with GPay / PhonePe / Paytm</p>
+              <p className="scan-text">Scan with your phone camera</p>
+              <p className="muted small-text">Opens a demo UPI page — no real money moves.</p>
               <div className="demo-box">
-                <small>Testing: pretend to be the payment provider</small>
+                <small>Testing without a phone</small>
+                <button className="primary" onClick={() => run(() => mockUpiPay(order.id))}>
+                  Simulate UPI Payment Success
+                </button>
+                <small>or send a signed webhook from a terminal:</small>
                 <code className="command">{command}</code>
                 <button className="ghost" onClick={copy}>{copied ? "Copied!" : "Copy command"}</button>
               </div>
             </div>
           ) : (
             <div className="method-body" data-testid="cash-panel">
-              <div className="cash-slot">
-                <div className="cash-note">{formatRupees(order.totalPaise)}</div>
-                <div className="cash-slot-bar" />
-              </div>
-              <p className="scan-text">Insert {formatRupees(order.totalPaise)} in the cash slot</p>
-              <p className="muted">The kiosk does not give change, so insert the exact amount.</p>
-              <div className="demo-box">
-                <small>Testing: no cash hardware here</small>
-                <button className="primary" onClick={simulateCash}>Simulate cash inserted</button>
-                {cashError && <p className="error">{cashError}</p>}
-              </div>
+              <div className="cash-wait-icon">💵</div>
+              <p className="scan-text">Pay {formatRupees(order.totalPaise)} in cash at the counter</p>
+              <p className="muted">The operator confirms the cash, then your locker unlocks.</p>
+              <button className="primary" onClick={() => run(() => requestCash(order.id))}>Pay with Cash</button>
             </div>
           )}
+          {actionError && <p className="error">{actionError}</p>}
         </section>
       </div>
     </>

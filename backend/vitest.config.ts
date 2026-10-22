@@ -9,7 +9,8 @@ export default defineConfig({
       DATABASE_URL:
         process.env.TEST_DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/pickup_test",
       WEBHOOK_SECRET: "test-secret",
-      ENABLE_CASH_SIMULATOR: "true",
+      ENABLE_PAYMENT_SIMULATOR: "true",
+      ADMIN_TOKEN: "test-admin-token",
     },
   },
 });
