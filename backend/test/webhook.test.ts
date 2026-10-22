@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { pool } from "../src/db/db.js";
+import { config } from "../src/config.js";
 import {
-  addProduct, expireOrder, getOrderStatus, placeOrder, resetDb, sendWebhook, startApp, stopApp,
+  addProduct, baseUrl, expireOrder, getOrderStatus, placeOrder, resetDb, sendWebhook, startApp, stopApp,
 } from "./helpers.js";
 
 beforeAll(startApp);
@@ -60,6 +61,36 @@ describe("payment webhook", () => {
     const productId = await addProduct(3, 1500);
     const order = await orderOf(productId, 1);
     await sendWebhook({ eventId: "evt_fail", orderId: order.id, amountPaise: 1500, status: "failed" });
+    expect(await getOrderStatus(order.id)).toBe("pending");
+  });
+});
+
+describe("cash payment (simulated acceptor)", () => {
+  const cash = (orderId: string) =>
+    fetch(`${baseUrl()}/payments/cash`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ orderId }),
+    });
+
+  it("marks the order paid, and pressing twice changes nothing", async () => {
+    const productId = await addProduct(3, 1500);
+    const order = await orderOf(productId, 2);
+
+    expect((await cash(order.id).then((r) => r.json())).result).toBe("paid");
+    expect((await cash(order.id).then((r) => r.json())).result).toBe("duplicate");
+    expect(await getOrderStatus(order.id)).toBe("paid");
+  });
+
+  it("is refused (404) and pays nothing when the simulator is off", async () => {
+    const productId = await addProduct(3, 1500);
+    const order = await orderOf(productId, 1);
+
+    config.cashSimulator = false;
+    const res = await cash(order.id);
+    config.cashSimulator = true;
+
+    expect(res.status).toBe(404);
     expect(await getOrderStatus(order.id)).toBe("pending");
   });
 });

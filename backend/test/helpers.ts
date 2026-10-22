@@ -5,13 +5,15 @@ import { migrate, pool } from "../src/db/db.js";
 import { sign } from "../src/modules/payments/signature.js";
 
 let server: Server;
-let baseUrl: string;
+let serverUrl: string;
 
 export async function startApp() {
   await migrate();
   server = createApp().listen(0);
-  baseUrl = `http://localhost:${(server.address() as AddressInfo).port}`;
+  serverUrl = `http://localhost:${(server.address() as AddressInfo).port}`;
 }
+
+export const baseUrl = () => serverUrl;
 
 export async function stopApp() {
   server.close();
@@ -42,7 +44,7 @@ export async function getOrderStatus(orderId: string) {
 }
 
 export function placeOrder(productId: number, quantity: number) {
-  return fetch(`${baseUrl}/orders`, {
+  return fetch(`${serverUrl}/orders`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ items: [{ productId, quantity }] }),
@@ -50,11 +52,11 @@ export function placeOrder(productId: number, quantity: number) {
 }
 
 export function getProducts() {
-  return fetch(`${baseUrl}/products`).then((r) => r.json() as Promise<any[]>);
+  return fetch(`${serverUrl}/products`).then((r) => r.json() as Promise<any[]>);
 }
 
 export function claim(orderId: string) {
-  return fetch(`${baseUrl}/orders/${orderId}/pickup-claim`, { method: "POST" });
+  return fetch(`${serverUrl}/orders/${orderId}/pickup-claim`, { method: "POST" });
 }
 
 export function sendWebhook(
@@ -62,7 +64,7 @@ export function sendWebhook(
   signature?: string,
 ) {
   const body = JSON.stringify({ status: "captured", ...event });
-  return fetch(`${baseUrl}/payments/webhook`, {
+  return fetch(`${serverUrl}/payments/webhook`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

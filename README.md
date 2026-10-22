@@ -55,13 +55,33 @@ cd e2e && npm install && npx playwright install chromium && npm test
 ```
 
 From the repo root, `npm run test:e2e` and `npm run test:backend` are shortcuts for the two suites.
-The screen is a 2D kiosk: SVG product illustrations (`ProductIcon.tsx`), green/orange/red stock badges, and a payment
-card with a UPI QR code (`qrcode.react`, link `upi://pay?pa=counter@upi&pn=SnackKiosk&am=<₹>&tr=<orderId>&tn=Order_<orderId>&cu=INR`),
-a countdown badge, and a copyable `send-webhook` command. I did not scan the QR with a phone or decode it.
+**Note:** the e2e run first resets orders and stock in the running app's database (`e2e/global-setup.ts`), because the tests
+buy and pick up real stock. Do not point it at data you care about.
 
-Covers: product list with illustrations and badges, order → QR + countdown → paid → pickup (second claim 409), countdown with the browser clock
-set 10 minutes ahead, expired hold message + stock released, wrong amount → needs-review message, cart cap.
-The frontend never reads `Date`, so the clock-skew test confirms the countdown is unaffected by it.
+### The screen
+
+- **Choose:** product cards with SVG illustrations (`ProductIcon.tsx`) and green/orange/red stock badges. Adding an item shows an
+  "added" toast and bumps a floating cart pill; the pill opens a cart drawer (`CartDrawer.tsx`) to review and edit the cart.
+- **Pay:** order summary + a countdown badge, and a UPI / Cash toggle. UPI shows a QR (`qrcode.react`, link
+  `upi://pay?pa=counter@upi&pn=SnackKiosk&am=<₹>&tr=<orderId>&tn=Order_<orderId>&cu=INR`) and a copyable `send-webhook` command.
+  I did not scan the QR with a phone or decode it.
+- **Collect:** once paid, a CSS-only animation opens the locker door and slides the order out (`LockerAnimation.tsx`).
+- `prefers-reduced-motion` turns the animations off.
+
+### Cash payment (a decision to be aware of)
+
+There is no cash hardware, so cash is a **simulated cash acceptor**: `POST /payments/cash {orderId}` pays the order for its
+full total, through the same code as the webhook (`payByCash` → `processWebhook`: row lock, idempotent per order, same
+late-payment rule). The amount comes from the database, never from the client. Because an open "mark as paid" endpoint would
+let anyone get free snacks, it only works when `ENABLE_CASH_SIMULATOR=true` (set in `docker-compose.yml` for the demo, and in
+the tests); otherwise it returns 404. A real acceptor would call an authenticated endpoint instead.
+
+### Browser tests cover
+
+Product list with illustrations and badges; toast, cart pill and drawer editing; order → QR + countdown → paid → locker
+animation → pickup (second claim 409); paying by cash; countdown with the browser clock set 10 minutes ahead; expired hold
+message + stock released; wrong amount → needs-review message; cart cap. The frontend never reads `Date`, so the clock-skew
+test confirms the countdown is unaffected by it.
 
 ## How it works (the important parts)
 
@@ -123,5 +143,5 @@ Trade-off: a late payer can "win" units that were released, as long as nobody el
 
 ## How I checked it
 
-Automated tests above (real Postgres, 18 tests, 7 browser tests) plus the manual flow in "Run it" (order → webhook → repeat webhook → two parallel claims returned 200 and 409).
+Automated tests above (real Postgres, 20 tests, 9 browser tests) plus the manual flow in "Run it" (order → webhook → repeat webhook → two parallel claims returned 200 and 409).
 I also checked the tests can fail: removing `FOR UPDATE` from `createOrder` makes the stock tests fail (orders oversold). See `AI_NOTES.md` for the AI usage notes.

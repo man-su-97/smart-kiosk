@@ -29,5 +29,9 @@ lock is visible in the SQL, which is what I need to be able to explain live.
    "Chocolate Bar" matched `cola` and showed the coffee cup. Tests passed (they only counted icons); I caught it by
    looking at the screenshot. Fixed with whole-word matching, and added a test that the chocolate icon contains
    "CHOCO". The same screenshots also showed the timer sitting beside the QR code and the command wrapping mid-number.
-5. Smaller: the first draft typed transaction parameters with an unreadable `Parameters<Parameters<…>>` expression;
+5. **Flaky-looking browser tests that were really shared data.** After the second redesign, 3 of 9 Playwright tests
+   timed out. Rather than assume the new UI was broken, I checked the stock: earlier runs had left paid-but-unclaimed
+   orders, so Chocolate Bar had 0 available and its "+" button was (correctly) disabled. Fix: a global setup that resets
+   orders and stock before each run; the suite now passes repeatedly.
+6. Smaller: the first draft typed transaction parameters with an unreadable `Parameters<Parameters<…>>` expression;
    replaced with a plain `Tx` type.

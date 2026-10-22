@@ -3,7 +3,7 @@ import { z } from "zod";
 import { config } from "../../config.js";
 import { HttpError } from "../../errors.js";
 import { isValidSignature } from "./signature.js";
-import { processWebhook } from "./service.js";
+import { payByCash, processWebhook } from "./service.js";
 
 export const paymentsRouter = Router();
 
@@ -12,6 +12,13 @@ const eventSchema = z.object({
   orderId: z.string().uuid(),
   amountPaise: z.number().int(),
   status: z.string(),
+});
+
+// Demo cash acceptor (off unless ENABLE_CASH_SIMULATOR=true). Body: { "orderId": "<uuid>" }.
+paymentsRouter.post("/payments/cash", express.json(), async (req, res) => {
+  if (!config.cashSimulator) throw new HttpError(404, "CASH_DISABLED", "Cash simulator is disabled");
+  const { orderId } = z.object({ orderId: z.string().uuid() }).parse(req.body);
+  res.json({ result: await payByCash(orderId) });
 });
 
 // express.raw keeps the body as untouched bytes. The signature is computed over

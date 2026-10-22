@@ -1,4 +1,5 @@
-import { withTransaction, type Tx } from "../../db/db.js";
+import { pool, withTransaction, type Tx } from "../../db/db.js";
+import { HttpError } from "../../errors.js";
 import { getHeldUnits } from "../products/service.js";
 
 export type WebhookEvent = {
@@ -15,6 +16,20 @@ export type WebhookResult =
   | "already_paid"
   | "paid"
   | "needs_review";
+
+// Simulated cash acceptor: treated exactly like a captured payment for the full order total,
+// so it reuses the same locking, idempotency (one event id per order) and late-payment rules.
+// The amount comes from the database, never from the client.
+export async function payByCash(orderId: string): Promise<WebhookResult> {
+  const { rows } = await pool.query("SELECT total_paise FROM orders WHERE id = $1", [orderId]);
+  if (rows.length === 0) throw new HttpError(404, "ORDER_NOT_FOUND", "Order not found");
+  return processWebhook({
+    eventId: `cash_${orderId}`,
+    orderId,
+    amountPaise: rows[0].total_paise,
+    status: "captured",
+  });
+}
 
 export async function processWebhook(event: WebhookEvent): Promise<WebhookResult> {
   return withTransaction(async (tx) => {
