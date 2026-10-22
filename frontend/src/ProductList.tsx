@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { fetchProducts, formatRupees, placeOrder, type CartLine, type Order, type Product } from "./api";
-import { KIND_BG, ProductIcon, kindOf } from "./ProductIcon";
+import { KIND_BG, kindOf } from "./ProductIcon";
+import { ProductImage } from "./ProductImage";
 import { AddedToast, CartDrawer, CartPill } from "./CartDrawer";
 import { Stepper } from "./Stepper";
 
@@ -29,6 +30,7 @@ export function ProductList({ onOrderPlaced }: { onOrderPlaced: (order: Order, l
   const [toast, setToast] = useState<{ text: string; id: number } | null>(null);
   const [placing, setPlacing] = useState(false);
   const [error, setError] = useState("");
+  const [category, setCategory] = useState("all");
 
   const load = () => fetchProducts().then(setProducts).catch((e) => setError(e.message));
   useEffect(() => {
@@ -82,8 +84,22 @@ export function ProductList({ onOrderPlaced }: { onOrderPlaced: (order: Order, l
       <h1 className="mt-2 mb-1 text-3xl font-extrabold tracking-tight">What would you like?</h1>
       <p className="text-muted">Tap + to add a snack. Pay on the next screen with UPI or cash.</p>
 
+      {/* Category filter: "All" plus every category that has products. */}
+      <div className="mt-4 flex flex-wrap gap-2" role="group" aria-label="Categories">
+        {["all", ...new Set(products.map((p) => p.category))].map((c) => (
+          <button
+            key={c}
+            onClick={() => setCategory(c)}
+            aria-pressed={category === c}
+            className={`btn rounded-full px-4 py-2 text-sm capitalize ${category === c ? "bg-ink text-white" : "bg-white shadow-card"}`}
+          >
+            {c === "all" ? "All" : c}
+          </button>
+        ))}
+      </div>
+
       <div className="mt-5 grid grid-cols-[repeat(auto-fill,minmax(210px,1fr))] gap-[18px]">
-        {products.map((p) => {
+        {products.filter((p) => category === "all" || p.category === category).map((p) => {
           const inCart = cart[p.id] ?? 0;
           return (
             <div
@@ -94,7 +110,7 @@ export function ProductList({ onOrderPlaced }: { onOrderPlaced: (order: Order, l
             >
               <StockBadge available={p.available} />
               <div className={`mb-3 grid h-[130px] w-full place-items-center rounded-[18px] ${KIND_BG[kindOf(p.name)]}`}>
-                <ProductIcon name={p.name} className="size-24 transition group-hover:scale-110 group-hover:-rotate-3" />
+                <ProductImage name={p.name} imageUrl={p.imageUrl} className="size-24 transition group-hover:scale-110 group-hover:-rotate-3" />
               </div>
               <div className="text-center text-[17px] font-bold">{p.name}</div>
               <div className="mt-0.5 mb-3 text-[19px] font-extrabold text-brand-dark">{formatRupees(p.pricePaise)}</div>

@@ -15,7 +15,11 @@ services:
           property: connectionString
       - key: WEBHOOK_SECRET # read it in the Render dashboard to run send-webhook against the live app
         generateValue: true
-      - key: ADMIN_TOKEN # the /admin password; read it in the Render dashboard
+      - key: NODE_ENV # production: secure cookies, and the app refuses to start without real secrets
+        value: production
+      - key: ADMIN_EMAIL # first admin login for /admin
+        value: admin@kiosk.local
+      - key: ADMIN_PASSWORD # generated; read it in the Render dashboard (Environment tab)
         generateValue: true
       - key: ENABLE_PAYMENT_SIMULATOR # demo: lets the QR page / Simulate button pay (fake money)
         value: "true"

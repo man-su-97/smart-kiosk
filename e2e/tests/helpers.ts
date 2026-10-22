@@ -1,5 +1,6 @@
 import { createHmac } from "node:crypto";
 import pg from "pg";
+import type { Page } from "@playwright/test";
 
 const API = "http://localhost:3000";
 const SECRET = process.env.WEBHOOK_SECRET ?? "dev-webhook-secret";
@@ -25,3 +26,17 @@ export async function expireOrder(orderId: string) {
 
 export const getProducts = () => fetch(`${API}/products`).then((r) => r.json() as Promise<any[]>);
 export const claimPickup = (orderId: string) => fetch(`${API}/orders/${orderId}/pickup-claim`, { method: "POST" });
+
+// Demo accounts from docker-compose.yml.
+export const ACCOUNTS = {
+  admin: { email: "admin@kiosk.local", password: "admin12345" },
+  staff: { email: "staff@kiosk.local", password: "staff12345" },
+};
+
+export async function loginToPortal(page: Page, role: keyof typeof ACCOUNTS) {
+  await page.goto("/admin");
+  await page.getByLabel("Email").fill(ACCOUNTS[role].email);
+  await page.getByLabel("Password").fill(ACCOUNTS[role].password);
+  await page.getByRole("button", { name: "Log in" }).click();
+  await page.getByTestId("who").waitFor();
+}

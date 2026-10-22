@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { claimPickup, expireOrder, getProducts, sendWebhook } from "./helpers";
 
-const ADMIN_TOKEN = "demo-admin-token"; // matches docker-compose.yml
+import { loginToPortal } from "./helpers";
 
 const card = (page: Page, name: string) => page.getByTestId("product").filter({ hasText: name });
 
@@ -125,9 +125,7 @@ test("cash: customer asks to pay cash, operator approves on /admin, locker unloc
 
   // The operator, in another tab.
   const admin = await context.newPage();
-  await admin.goto("/admin");
-  await admin.getByLabel("Admin token").fill(ADMIN_TOKEN);
-  await admin.getByRole("button", { name: "Open dashboard" }).click();
+  await loginToPortal(admin, "staff");
   const request = admin.getByTestId("cash-request").filter({ hasText: orderId.slice(0, 8) });
   await expect(request).toContainText("₹45.00");
   await expect(request).toContainText("1 × Chocolate Bar");
@@ -146,21 +144,11 @@ test("cash: operator rejects, the kiosk says declined and the stock comes back",
   await page.getByRole("button", { name: "Pay with Cash" }).click();
 
   const admin = await context.newPage();
-  await admin.goto("/admin");
-  await admin.getByLabel("Admin token").fill(ADMIN_TOKEN);
-  await admin.getByRole("button", { name: "Open dashboard" }).click();
+  await loginToPortal(admin, "staff");
   await admin.getByTestId("cash-request").filter({ hasText: orderId.slice(0, 8) }).getByRole("button", { name: "Reject" }).click();
 
   await expect(page.getByRole("heading", { name: "Cash payment declined" })).toBeVisible({ timeout: 8000 });
   expect((await getProducts()).find((p) => p.name === "Chocolate Bar").available).toBe(before);
-});
-
-test("admin dashboard refuses a wrong token", async ({ page }) => {
-  await page.goto("/admin");
-  await page.getByLabel("Admin token").fill("wrong-token");
-  await page.getByRole("button", { name: "Open dashboard" }).click();
-  await expect(page.getByText("Wrong or missing admin token")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Operator login" })).toBeVisible();
 });
 
 test("countdown is right even when the counter's clock is 10 minutes wrong", async ({ page }) => {

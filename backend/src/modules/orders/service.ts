@@ -18,11 +18,12 @@ export async function createOrder(requested: Item[]) {
     // Lock the product rows. A second buyer of the same product waits here until
     // we commit, then sees our hold when it counts. This is what stops overselling.
     const { rows: products } = await tx.query(
-      `SELECT id, price_paise, stock FROM products
+      `SELECT id, price_paise, cost_paise, stock, active FROM products
         WHERE id = ANY($1) ORDER BY id FOR UPDATE`,
       [productIds],
     );
-    if (products.length !== productIds.length) {
+    // Hidden (inactive) products cannot be bought, same as products that do not exist.
+    if (products.length !== productIds.length || products.some((p) => !p.active)) {
       throw new HttpError(400, "UNKNOWN_PRODUCT", "One or more products do not exist");
     }
 
@@ -49,9 +50,9 @@ export async function createOrder(requested: Item[]) {
     const id: string = rows[0].id;
     for (const p of products) {
       await tx.query(
-        `INSERT INTO order_items (order_id, product_id, quantity, unit_price_paise)
-         VALUES ($1, $2, $3, $4)`,
-        [id, p.id, wanted.get(p.id), p.price_paise],
+        `INSERT INTO order_items (order_id, product_id, quantity, unit_price_paise, unit_cost_paise)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [id, p.id, wanted.get(p.id), p.price_paise, p.cost_paise],
       );
     }
     return id;

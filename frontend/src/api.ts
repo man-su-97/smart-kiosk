@@ -1,4 +1,12 @@
-export type Product = { id: number; name: string; pricePaise: number; stock: number; available: number };
+export type Product = {
+  id: number;
+  name: string;
+  pricePaise: number;
+  stock: number;
+  available: number;
+  category: string;
+  imageUrl: string | null;
+};
 
 export type Order = {
   id: string;
@@ -20,16 +28,26 @@ export type CashRequest = {
   items: { name: string; quantity: number }[];
 };
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+// Same-origin requests send the session cookie automatically, so the admin calls need no token.
+export async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, options);
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.message ?? "Request failed");
+  const data = res.status === 204 ? null : await res.json();
+  if (!res.ok) throw new ApiError(res.status, data?.message ?? "Request failed");
   return data;
 }
 
-const postJson = (body?: unknown, headers: Record<string, string> = {}): RequestInit => ({
-  method: "POST",
-  headers: { "Content-Type": "application/json", ...headers },
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+export const sendJson = (method: string, body?: unknown): RequestInit => ({
+  method,
+  headers: { "Content-Type": "application/json" },
   body: body === undefined ? undefined : JSON.stringify(body),
 });
 
@@ -38,20 +56,11 @@ export const fetchProducts = () => request<Product[]>("/products");
 export const fetchOrder = (id: string) => request<Order>(`/orders/${id}`);
 
 export const placeOrder = (items: { productId: number; quantity: number }[]) =>
-  request<Order>("/orders", postJson({ items }));
+  request<Order>("/orders", sendJson("POST", { items }));
 
-// Customer chose "Pay with cash": the order waits for the operator.
-export const requestCash = (orderId: string) => request<Order>(`/orders/${orderId}/cash-request`, postJson());
+// Customer chose "Pay with cash": the order waits for staff.
+export const requestCash = (orderId: string) => request<Order>(`/orders/${orderId}/cash-request`, sendJson("POST"));
 
 // Mock UPI (demo): what the phone page and the "Simulate" button call.
 export const mockUpiPay = (orderId: string) =>
-  request<{ result: string }>("/payments/mock-success", postJson({ orderId }));
-
-// Operator (/admin) calls. The token is the operator's password.
-const admin = (token: string) => ({ "X-Admin-Token": token });
-export const fetchCashRequests = (token: string) =>
-  request<CashRequest[]>("/admin/cash-requests", { headers: admin(token) });
-export const approveCash = (token: string, id: string) =>
-  request<{ result: string }>(`/admin/orders/${id}/approve-cash`, postJson(undefined, admin(token)));
-export const rejectCash = (token: string, id: string) =>
-  request<{ result: string }>(`/admin/orders/${id}/reject-cash`, postJson(undefined, admin(token)));
+  request<{ result: string }>("/payments/mock-success", sendJson("POST", { orderId }));

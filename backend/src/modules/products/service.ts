@@ -20,13 +20,18 @@ export async function getHeldUnits(db: Db, productIds: number[]): Promise<Map<nu
 }
 
 // available = stock - held. Same rule, written as one query for the whole list.
-export async function listProducts(db: Db) {
+// The kiosk sees active products only; the admin catalog passes includeInactive.
+export async function listProducts(db: Db, { includeInactive = false } = {}) {
   const { rows } = await db.query(
     `SELECT p.id,
             p.name,
             p.price_paise AS "pricePaise",
+            p.cost_paise AS "costPaise",
             p.stock,
-            p.stock - COALESCE(h.held, 0) AS available
+            p.stock - COALESCE(h.held, 0) AS available,
+            p.category,
+            p.image_url AS "imageUrl",
+            p.active
        FROM products p
        LEFT JOIN (
          SELECT oi.product_id, SUM(oi.quantity)::int AS held
@@ -36,7 +41,9 @@ export async function listProducts(db: Db) {
              OR (o.status IN ('pending', 'pending_cash_approval') AND o.expires_at > clock_timestamp())
           GROUP BY oi.product_id
        ) h ON h.product_id = p.id
+      WHERE p.active OR $1
       ORDER BY p.id`,
+    [includeInactive],
   );
   return rows;
 }

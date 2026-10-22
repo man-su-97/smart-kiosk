@@ -51,16 +51,27 @@ export async function migrate() {
   await pool.query(sql);
 }
 
-// Five starter products. Only inserted when the table is empty.
+// Five starter products, only when the table is empty. (User accounts: seedUsers in modules/auth.)
 export async function seed() {
   const { rows } = await pool.query("SELECT count(*)::int AS n FROM products");
-  if (rows[0].n > 0) return;
+  if (rows[0].n === 0) {
+    await pool.query(
+      `INSERT INTO products (name, price_paise, stock) VALUES
+         ('Masala Chips',   2000, 10),
+         ('Chocolate Bar',  4500,  8),
+         ('Cold Coffee',    6000,  6),
+         ('Glucose Biscuits', 1000, 15),
+         ('Roasted Peanuts', 3000, 12)`,
+    );
+  }
+  // Give the starter products a category and cost (also upgrades databases created before
+  // these columns existed). Only touches rows that still have no cost.
   await pool.query(
-    `INSERT INTO products (name, price_paise, stock) VALUES
-       ('Masala Chips',   2000, 10),
-       ('Chocolate Bar',  4500,  8),
-       ('Cold Coffee',    6000,  6),
-       ('Glucose Biscuits', 1000, 15),
-       ('Roasted Peanuts', 3000, 12)`,
+    `UPDATE products SET category = v.category, cost_paise = v.cost
+       FROM (VALUES ('Masala Chips', 'chips', 1200), ('Chocolate Bar', 'chocolate', 3000),
+                    ('Cold Coffee', 'drinks', 3500), ('Glucose Biscuits', 'biscuits', 600),
+                    ('Roasted Peanuts', 'nuts', 1800)) AS v(name, category, cost)
+      WHERE products.name = v.name AND products.cost_paise = 0`,
   );
+
 }

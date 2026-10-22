@@ -29,10 +29,12 @@ The webhook secret is `WEBHOOK_SECRET` (`dev-webhook-secret` in `docker-compose.
 ## Deploy (free, Render) — `deploy` branch only
 
 One service: the root `Dockerfile` builds the React app and Express serves it together with the API under `/api`.
-`render.yaml` creates that free web service plus a free Postgres, with `WEBHOOK_SECRET` and `ADMIN_TOKEN` generated.
+`render.yaml` creates that free web service plus a free Postgres, with `WEBHOOK_SECRET` and `ADMIN_PASSWORD` generated
+(`NODE_ENV=production`: secure cookies, and the app refuses to start if a secret is missing).
 
 1. Render dashboard → **New → Blueprint** → this repo, branch `deploy` → **Apply**.
-2. Open the service URL. Read `WEBHOOK_SECRET` / `ADMIN_TOKEN` under the service's **Environment** tab.
+2. Open the service URL. Read `WEBHOOK_SECRET` / `ADMIN_PASSWORD` under the service's **Environment** tab;
+   log in at `/admin` as `admin@kiosk.local` with that password.
 3. Pay from your machine: `cd backend && API_URL=https://<service>.onrender.com/api WEBHOOK_SECRET=<secret> npm run send-webhook -- <orderId> <amountPaise>`
 
 Free-plan limits: the service sleeps after 15 idle minutes (first request then takes about a minute) and the free
@@ -56,6 +58,10 @@ cd backend && npm install && npm test
 | `pickup.test.ts` | 2 (and 10) simultaneous claims → exactly one 200, the rest 409, stock reduced once. Unpaid / expired → 409. |
 | `hardening.test.ts` | A webhook at the 120 s deadline cannot sell a unit twice. A connection killed mid-transaction does not crash the API. |
 | `cash-and-mock-upi.test.ts` | The optional cash / mock-UPI payment paths (see "Beyond the brief"). |
+| `auth.test.ts` | Login, cookie flags, same 401 for wrong email / password, only hashes stored, logout / expiry / deactivation end the session, 429 after 10 failures, staff → 403 on admin routes. |
+| `catalog.test.ts` | Product validation, create / edit / hide, hidden products cannot be ordered, stock cannot go below held units (also when an order and a stock cut race), cost snapshot. |
+| `cash-log.test.ts` | Approval logs operator and amount in the same transaction; two staff at once → one payment; approve vs reject at once → never both; late approval still counted as cash. |
+| `reports.test.ts` | Exact revenue / profit / units / cash for a fixed week, India-day boundary (00:30 IST), zero days, date validation, PDF download and access rules. |
 
 Browser tests (Playwright) drive the real screen; start the app first. They reset orders and stock in the app's database.
 
@@ -110,22 +116,57 @@ Added after the core was done; the core does not depend on them.
 - UPI QR that opens a demo payment page (`/mock-pay`), and the on-screen Simulate button. Both go through the same
   payment code as the webhook. Only enabled with `ENABLE_PAYMENT_SIMULATOR=true` (on in `docker-compose.yml`).
 - Cash: the customer chooses cash, the order waits as `pending_cash_approval`, and an operator approves or rejects it on
-  `/admin` (token `demo-admin-token`). Rejected orders become `cancelled` and release their stock.
+  `/admin`. Rejected orders become `cancelled` and release their stock.
+- Staff / admin portal at `/admin`, described below.
+
+## Admin portal: roles, products, cash log, analytics, PDF
+
+Local logins (from `docker-compose.yml`): **admin** `admin@kiosk.local` / `admin12345`, **staff** `staff@kiosk.local` / `staff12345`.
+
+| Role | Can use |
+|---|---|
+| `staff` | Cash queue (approve / reject). |
+| `admin` | Everything staff can, plus Dashboard, Products, Reports. |
+
+- **Login** (`POST /auth/login`, `POST /auth/logout`, `GET /auth/me`): passwords hashed with bcrypt (`bcryptjs`, cost 10).
+  A login creates a random 32-byte token in an `HttpOnly`, `SameSite=Strict` cookie (`sid`); the database stores only its
+  SHA-256, with an 8 h expiry. Sessions live in the database, so logout or deactivating a user takes effect immediately.
+  Wrong email and wrong password give the same 401. 10 failed logins per IP per 15 min → 429.
+- **Roles** are checked on the server by `requireRole("staff" | "admin")` (`backend/src/auth.ts`): no session → 401,
+  wrong role → 403. The UI only hides tabs.
+- **Cash log**: each approval is a `payment_events` row with `source = 'cash'` and `operator_id`, written in the same
+  transaction as the payment, so the log and the order can never disagree. The "is it still waiting for cash?" check is
+  done after the order row is locked, so an approve and a reject at the same moment cannot both win.
+  Approving twice returns `duplicate` and changes nothing (same rule as webhooks).
+- **Products** (`/admin/products`, admin): create / edit / hide with strict Zod rules (whole paise, `https://` image URLs,
+  cost ≤ price, unknown fields rejected), the same rules in the form. Products are hidden, never deleted (old orders point
+  at them). **Stock can never be set below the units currently held by orders**: the edit locks the product row like
+  `createOrder` does and refuses with 409. Each order line stores the cost at order time, so later cost changes do not
+  rewrite past profit.
+- **Analytics** (`/admin/analytics/summary|daily|categories|top-products?from&to`, admin): "sold" = paid or collected,
+  counted on the **India (Asia/Kolkata) day** it was paid (a sale at 00:30 IST is that day, not the previous UTC day).
+  Days with no sales show as 0. Cash collected counts every cash approval, even one that ended in `needs_review`
+  (the money is still in the drawer).
+- **Daily PDF** (`/admin/reports/daily-pdf?date=YYYY-MM-DD`, admin): `pdfkit`, built from the same functions as the
+  dashboard, so the numbers match. Amounts are written "Rs." because the built-in PDF font has no ₹ sign.
+- The portal (and its chart library) is loaded only on `/admin`, so the kiosk page stays small.
+- Not built: managing users from the UI (accounts come from env vars at start, or SQL), password reset.
 
 ## What I would do next
 
 - Refund / resolution screen for `needs_review` orders, and flag a second payment for an already-paid order.
-- Let an operator approve cash that arrives just after the hold expired (today it is refused), and do the approve/reject
-  status check inside the lock.
+- Let staff approve cash that arrives just after the hold expired (today it is refused once the order shows expired).
 - Rate-limit `POST /orders` (a script can keep stock held) and cap total quantity per product after merging lines.
-- Database timeouts (connection, statement, lock); require real secrets in production instead of dev defaults.
+- Database timeouts (connection, statement, lock).
 - Production frontend build, authentication for lockers, and tests with several API instances.
 
 ## How I checked it
 
-- 31 backend tests and 13 browser tests pass, also from a fresh `docker compose down -v && docker compose up --build`.
+- 60 backend tests and 18 browser tests pass, also from a fresh `docker compose down -v && docker compose up --build`,
+  and the browser tests also pass against the production image (root `Dockerfile`, `NODE_ENV=production`).
 - The tests can fail: removing `FOR UPDATE` from `createOrder` makes the race tests fail (9 orders for 2 units), and
-  the deadline test fails against the earlier webhook code.
+  the deadline test fails against the earlier webhook code. Likewise for the portal: removing the locked status check,
+  the stock-vs-held rule, or the India time zone each makes its test fail.
 - Manually: order → webhook → same webhook again (no change) → two parallel pickup claims (200 and 409);
   `docker compose restart db` leaves the API serving.
 - How AI tools were used: see `AI_NOTES.md`.

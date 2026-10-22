@@ -47,3 +47,38 @@ CREATE TABLE IF NOT EXISTS payment_events (
   amount_paise INTEGER NOT NULL,
   received_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- ---------------------------------------------------------------------------
+-- Admin portal (all idempotent: this file runs on every start).
+
+-- Catalog details. "Deleting" a product hides it (active = false): old orders still point at it.
+ALTER TABLE products ADD COLUMN IF NOT EXISTS category   TEXT    NOT NULL DEFAULT 'snacks';
+ALTER TABLE products ADD COLUMN IF NOT EXISTS image_url  TEXT;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS cost_paise INTEGER NOT NULL DEFAULT 0 CHECK (cost_paise >= 0);
+ALTER TABLE products ADD COLUMN IF NOT EXISTS active     BOOLEAN NOT NULL DEFAULT true;
+
+-- Cost at the time of ordering (like unit_price_paise), so later cost changes don't rewrite past profit.
+ALTER TABLE order_items ADD COLUMN IF NOT EXISTS unit_cost_paise INTEGER NOT NULL DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS users (
+  id            SERIAL PRIMARY KEY,
+  email         TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  role          TEXT NOT NULL CHECK (role IN ('admin', 'staff')),
+  active        BOOLEAN NOT NULL DEFAULT true,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- One row per logged-in browser. Only the SHA-256 of the cookie value is stored,
+-- so reading this table does not let anyone log in.
+CREATE TABLE IF NOT EXISTS sessions (
+  token_hash TEXT PRIMARY KEY,
+  user_id    INTEGER NOT NULL REFERENCES users(id),
+  expires_at TIMESTAMPTZ NOT NULL
+);
+
+-- Where each payment came from and what it did. Cash approvals are logged here
+-- (source = 'cash', operator_id = staff user) in the same transaction as the payment.
+ALTER TABLE payment_events ADD COLUMN IF NOT EXISTS source      TEXT NOT NULL DEFAULT 'webhook';
+ALTER TABLE payment_events ADD COLUMN IF NOT EXISTS operator_id INTEGER REFERENCES users(id);
+ALTER TABLE payment_events ADD COLUMN IF NOT EXISTS outcome     TEXT;

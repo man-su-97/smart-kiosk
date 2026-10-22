@@ -3,6 +3,7 @@ import type { Server } from "node:http";
 import { createApp } from "../src/app.js";
 import { migrate, pool } from "../src/db/db.js";
 import { sign } from "../src/modules/payments/signature.js";
+import { createUser, type Role } from "../src/modules/auth/service.js";
 
 let server: Server;
 let serverUrl: string;
@@ -22,7 +23,9 @@ export async function stopApp() {
 
 // Empty every table so each test starts clean.
 export async function resetDb() {
-  await pool.query("TRUNCATE payment_events, order_items, orders, products RESTART IDENTITY CASCADE");
+  await pool.query(
+    "TRUNCATE payment_events, order_items, orders, products, sessions, users RESTART IDENTITY CASCADE",
+  );
 }
 
 export async function addProduct(stock: number, pricePaise = 1000) {
@@ -84,4 +87,27 @@ export async function createPaidOrder(productId: number, quantity: number, total
 // Pretend the 120s hold ran out, without waiting.
 export async function expireOrder(orderId: string) {
   await pool.query("UPDATE orders SET expires_at = now() - interval '1 second' WHERE id = $1", [orderId]);
+}
+
+export const PASSWORD = "correct-horse-1";
+
+// Create a user and log in. Returns the headers to send (the session cookie) and the user.
+export async function loginAs(role: Role, email = `${role}@test.local`) {
+  const user = await createUser(email, PASSWORD, role);
+  const res = await fetch(`${serverUrl}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password: PASSWORD }),
+  });
+  const cookie = res.headers.get("set-cookie")!.split(";")[0]; // "sid=<token>"
+  return { headers: { Cookie: cookie }, user };
+}
+
+// Small JSON request helper for the admin tests.
+export function api(path: string, options: { method?: string; body?: unknown; headers?: Record<string, string> } = {}) {
+  return fetch(`${serverUrl}${path}`, {
+    method: options.method ?? "GET",
+    headers: { "Content-Type": "application/json", ...options.headers },
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+  });
 }

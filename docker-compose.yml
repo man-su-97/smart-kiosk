@@ -22,7 +22,11 @@ services:
       DATABASE_URL: postgres://postgres:postgres@db:5432/pickup
       WEBHOOK_SECRET: dev-webhook-secret
       ENABLE_PAYMENT_SIMULATOR: "true" # demo only, see README
-      ADMIN_TOKEN: demo-admin-token     # operator password for /admin
+      # Demo logins for the /admin portal (created at start if missing)
+      ADMIN_EMAIL: admin@kiosk.local
+      ADMIN_PASSWORD: admin12345
+      STAFF_EMAIL: staff@kiosk.local
+      STAFF_PASSWORD: staff12345
     ports:
       - "3000:3000"
     depends_on:

@@ -25,13 +25,12 @@ async function statusOf(id: string): Promise<string> {
   return rows[0].status;
 }
 
-// Operator got the cash. Paying goes through the normal payment path (locks, idempotency,
-// late-payment rule), so approving twice or after a UPI payment changes nothing.
-export async function approveCash(id: string) {
-  if ((await statusOf(id)) !== "pending_cash_approval") {
-    throw new HttpError(409, "NOT_AWAITING_CASH", "Order is not waiting for cash");
-  }
-  return { result: await payInternally(id, "cash") };
+// Staff got the cash. Paying goes through the normal payment path (locks, idempotency,
+// late-payment rule). The status check happens inside that transaction, after the order row
+// is locked, so an approve and a reject at the same moment can never both win.
+// The payment event row records who took the money (operatorId).
+export async function approveCash(id: string, operatorId: number) {
+  return { result: await payInternally(id, "cash", { operatorId, requireStatus: "pending_cash_approval" }) };
 }
 
 // Operator did not get the money: cancel the order, which releases its held units.

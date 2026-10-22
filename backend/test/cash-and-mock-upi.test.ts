@@ -1,14 +1,19 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { config } from "../src/config.js";
 import {
-  addProduct, baseUrl, claim, expireOrder, getOrderStatus, getProducts, placeOrder, resetDb, startApp, stopApp,
+  addProduct, baseUrl, claim, expireOrder, getOrderStatus, getProducts, loginAs, placeOrder, resetDb, startApp,
+  stopApp,
 } from "./helpers.js";
 
 beforeAll(startApp);
 afterAll(stopApp);
-beforeEach(resetDb);
 
-const ADMIN = { "X-Admin-Token": process.env.ADMIN_TOKEN! };
+// The cash queue needs a staff login (session cookie). Fresh database and login per test.
+let ADMIN: Record<string, string>;
+beforeEach(async () => {
+  await resetDb();
+  ADMIN = (await loginAs("staff")).headers;
+});
 
 const post = (path: string, body?: unknown, headers: Record<string, string> = {}) =>
   fetch(`${baseUrl()}${path}`, {
@@ -58,11 +63,11 @@ describe("cash: customer requests, operator approves or rejects", () => {
     expect((await post(`/orders/${orderId}/cash-request`)).status).toBe(409);
   });
 
-  it("admin endpoints need the admin token", async () => {
+  it("cash queue endpoints need a staff login", async () => {
     const { orderId } = await newOrder();
     await post(`/orders/${orderId}/cash-request`);
     expect((await fetch(`${baseUrl()}/admin/cash-requests`)).status).toBe(401);
-    expect((await post(`/admin/orders/${orderId}/approve-cash`, undefined, { "X-Admin-Token": "wrong" })).status).toBe(401);
+    expect((await post(`/admin/orders/${orderId}/approve-cash`, undefined, { Cookie: "sid=made-up" })).status).toBe(401);
     expect(await getOrderStatus(orderId)).toBe("pending_cash_approval");
   });
 
@@ -78,8 +83,8 @@ describe("cash: customer requests, operator approves or rejects", () => {
     expect(approved.result).toBe("paid");
     expect(await getOrderStatus(orderId)).toBe("paid");
 
-    // Approving again is refused, and only one pickup succeeds.
-    expect((await post(`/admin/orders/${orderId}/approve-cash`, undefined, ADMIN)).status).toBe(409);
+    // Approving again changes nothing (same event id: duplicate), and only one pickup succeeds.
+    expect((await post(`/admin/orders/${orderId}/approve-cash`, undefined, ADMIN).then((r) => r.json())).result).toBe("duplicate");
     const claims = await Promise.all([claim(orderId), claim(orderId)]);
     expect(claims.map((r) => r.status).sort()).toEqual([200, 409]);
   });

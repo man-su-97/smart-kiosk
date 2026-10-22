@@ -7,9 +7,14 @@ import { productsRouter } from "./modules/products/routes.js";
 import { ordersRouter } from "./modules/orders/routes.js";
 import { paymentsRouter } from "./modules/payments/routes.js";
 import { adminRouter } from "./modules/admin/routes.js";
+import { authRouter } from "./modules/auth/routes.js";
+import { catalogRouter } from "./modules/catalog/routes.js";
+import { reportsRouter } from "./modules/reports/routes.js";
 
 export function createApp() {
   const app = express();
+  // Behind one proxy in production (Render), so req.ip is the real visitor (used by the login limit).
+  if (config.isProduction) app.set("trust proxy", 1);
 
   // The browser calls /api/products etc. Locally the Vite dev server strips /api; in the deployed
   // single service there is no Vite, so strip it here. Plain /products keeps working too.
@@ -23,7 +28,10 @@ export function createApp() {
   app.use(express.json());
   app.use(productsRouter);
   app.use(ordersRouter);
+  app.use(authRouter);
   app.use(adminRouter);
+  app.use(catalogRouter);
+  app.use(reportsRouter);
 
   // Deployed: also serve the built React app (STATIC_DIR) from the same address. Any other
   // GET (/, /admin, /mock-pay) gets index.html and React picks the page from the URL.

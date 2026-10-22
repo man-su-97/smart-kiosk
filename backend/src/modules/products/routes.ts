@@ -4,6 +4,8 @@ import { listProducts } from "./service.js";
 
 export const productsRouter = Router();
 
+// Public kiosk list: cost price stays private.
 productsRouter.get("/products", async (_req, res) => {
-  res.json(await listProducts(pool));
+  const products = await listProducts(pool);
+  res.json(products.map(({ costPaise, active, ...product }) => product));
 });
