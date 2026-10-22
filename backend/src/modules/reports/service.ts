@@ -106,7 +106,7 @@ export async function topProducts(range: Range, limit = 10) {
 // ended as needs_review (paid too late, stock gone): the money is still in the drawer.
 export async function cashByOperator(range: Range) {
   const { rows } = await pool.query(
-    `SELECT u.id AS "operatorId", u.email, COUNT(*) AS approvals, SUM(pe.amount_paise) AS amount
+    `SELECT u.id AS "operatorId", u.email, COALESCE(u.name, u.email) AS name, COUNT(*) AS approvals, SUM(pe.amount_paise) AS amount
        FROM payment_events pe
        JOIN users u ON u.id = pe.operator_id
       WHERE pe.source = 'cash'
@@ -118,7 +118,72 @@ export async function cashByOperator(range: Range) {
   return rows.map((r) => ({
     operatorId: r.operatorId as number,
     email: r.email as string,
+    name: r.name as string,
     approvals: num(r.approvals),
     amountPaise: num(r.amount),
+  }));
+}
+
+export type Bill = {
+  billNo: string; // BILL-000123
+  orderId: string;
+  date: string; // 22 Oct 2026 (India time)
+  time: string; // 07:45 PM
+  kioskCode: string;
+  kioskName: string;
+  items: string; // "Chips × 2, Cola × 1"
+  quantity: number;
+  amountPaise: number;
+  paymentMode: "UPI" | "Cash" | "-";
+  staff: string; // cash: who collected it; UPI: who was on duty at the kiosk
+  status: "Paid" | "Collected";
+  demo: boolean; // created by the demo-data script
+};
+
+// Every sale in the range, one row per bill, oldest first. Used by the PDF register.
+export async function bills(range: Range): Promise<Bill[]> {
+  const { rows } = await pool.query(
+    `SELECT o.id, o.bill_no, o.status, o.total_paise,
+            to_char(o.paid_at AT TIME ZONE $3, 'DD Mon YYYY') AS date,
+            to_char(o.paid_at AT TIME ZONE $3, 'HH12:MI AM')  AS time,
+            k.code AS kiosk_code, k.name AS kiosk_name,
+            pay.source, pay.event_id,
+            COALESCE(collector.name, collector.email) AS collector,
+            COALESCE(agent.name, agent.email)         AS agent,
+            lines.items, lines.quantity
+       FROM orders o
+       LEFT JOIN kiosks k ON k.id = o.kiosk_id
+       -- the payment that paid this order (and, for cash, who took the money)
+       LEFT JOIN LATERAL (
+         SELECT pe.source, pe.operator_id, pe.event_id FROM payment_events pe
+          WHERE pe.order_id = o.id AND pe.outcome = 'paid' ORDER BY pe.received_at LIMIT 1
+       ) pay ON true
+       LEFT JOIN users collector ON collector.id = pay.operator_id
+       LEFT JOIN users agent ON agent.id = o.agent_user_id
+       JOIN LATERAL (
+         SELECT string_agg(p.name || ' × ' || oi.quantity, ', ' ORDER BY p.name) AS items,
+                SUM(oi.quantity) AS quantity
+           FROM order_items oi JOIN products p ON p.id = oi.product_id
+          WHERE oi.order_id = o.id
+       ) lines ON true
+      WHERE o.status IN ('paid', 'claimed')
+        AND (o.paid_at AT TIME ZONE $3)::date BETWEEN $1::date AND $2::date
+      ORDER BY o.paid_at, o.bill_no`,
+    params(range),
+  );
+  return rows.map((r) => ({
+    billNo: `BILL-${String(r.bill_no).padStart(6, "0")}`,
+    orderId: r.id,
+    date: r.date,
+    time: r.time,
+    kioskCode: r.kiosk_code ?? "-",
+    kioskName: r.kiosk_name ?? "",
+    items: r.items,
+    quantity: num(r.quantity),
+    amountPaise: num(r.total_paise),
+    paymentMode: r.source === "cash" ? "Cash" : r.source ? "UPI" : "-",
+    staff: (r.source === "cash" ? r.collector : r.agent) ?? "-",
+    status: r.status === "claimed" ? "Collected" : "Paid",
+    demo: typeof r.event_id === "string" && r.event_id.startsWith("demo_"),
   }));
 }

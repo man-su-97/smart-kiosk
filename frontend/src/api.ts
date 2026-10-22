@@ -19,7 +19,8 @@ export type Order = {
 export type CartLine = { product: Product; quantity: number };
 
 // Money is whole paise everywhere; only convert to rupees when drawing the screen.
-export const formatRupees = (paise: number) => `₹${(paise / 100).toFixed(2)}`;
+const rupees = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" });
+export const formatRupees = (paise: number) => rupees.format(paise / 100); // ₹12,340.00
 
 export type CashRequest = {
   id: string;
@@ -55,8 +56,11 @@ export const fetchProducts = () => request<Product[]>("/products");
 
 export const fetchOrder = (id: string) => request<Order>(`/orders/${id}`);
 
+// Which kiosk this screen is, from the address: /?kiosk=KSK-BLR-01. None = the first kiosk.
+export const kioskCode = new URLSearchParams(window.location.search).get("kiosk") ?? undefined;
+
 export const placeOrder = (items: { productId: number; quantity: number }[]) =>
-  request<Order>("/orders", sendJson("POST", { items }));
+  request<Order>("/orders", sendJson("POST", { items, kioskCode }));
 
 // Customer chose "Pay with cash": the order waits for staff.
 export const requestCash = (orderId: string) => request<Order>(`/orders/${orderId}/cash-request`, sendJson("POST"));

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { formatRupees, type CashRequest } from "../api";
 import { approveCash, fetchCashRequests, rejectCash } from "./adminApi";
+import { MyDuty } from "./MyDuty";
 
 // Customers waiting to pay cash at the counter. Refreshed every 2 seconds.
 export function CashQueue() {
@@ -36,6 +37,7 @@ export function CashQueue() {
 
   return (
     <section>
+      <MyDuty />
       <h1 className="text-3xl font-extrabold tracking-tight">Cash queue</h1>
       <p className="mb-4 text-muted">Take the cash at the counter, then approve. Your name is recorded with each approval.</p>
       {message && <p className="mb-3 rounded-xl bg-[#dcf5e8] p-3 font-semibold text-[#167a4a]" role="status">{message}</p>}

@@ -91,7 +91,7 @@ export function Dashboard() {
         <Table
           title="Cash collected by staff"
           head={["Staff", "Approvals", "Amount"]}
-          rows={summary.cashByOperator.map((c) => [c.email, String(c.approvals), formatRupees(c.amountPaise)])}
+          rows={summary.cashByOperator.map((c) => [c.name, String(c.approvals), formatRupees(c.amountPaise)])}
         />
       </div>
     </section>

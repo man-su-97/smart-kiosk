@@ -17,11 +17,11 @@ const sha256 = (value: string) => createHash("sha256").update(value).digest("hex
 // password and the login form cannot be used to find out which emails have accounts.
 const DUMMY_HASH = bcrypt.hashSync("no-such-user", BCRYPT_COST);
 
-export async function createUser(email: string, password: string, role: Role): Promise<User> {
+export async function createUser(email: string, password: string, role: Role, name?: string): Promise<User> {
   const hash = await bcrypt.hash(password, BCRYPT_COST);
   const { rows } = await pool.query(
-    "INSERT INTO users (email, password_hash, role) VALUES (lower($1), $2, $3) RETURNING id, email, role",
-    [email, hash, role],
+    "INSERT INTO users (email, password_hash, role, name) VALUES (lower($1), $2, $3, $4) RETURNING id, email, role",
+    [email, hash, role, name ?? null],
   );
   return rows[0];
 }
@@ -29,10 +29,10 @@ export async function createUser(email: string, password: string, role: Role): P
 // First admin (when there are no users yet) and the optional demo staff account.
 export async function seedUsers() {
   const { rows } = await pool.query("SELECT count(*)::int AS n FROM users");
-  if (rows[0].n === 0) await createUser(config.adminEmail, config.adminPassword, "admin");
+  if (rows[0].n === 0) await createUser(config.adminEmail, config.adminPassword, "admin", "Admin");
   if (config.staffEmail && config.staffPassword) {
     const { rows: staff } = await pool.query("SELECT 1 FROM users WHERE email = lower($1)", [config.staffEmail]);
-    if (staff.length === 0) await createUser(config.staffEmail, config.staffPassword, "staff");
+    if (staff.length === 0) await createUser(config.staffEmail, config.staffPassword, "staff", "Counter staff");
   }
 }
 

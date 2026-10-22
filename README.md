@@ -61,7 +61,10 @@ cd backend && npm install && npm test
 | `auth.test.ts` | Login, cookie flags, same 401 for wrong email / password, only hashes stored, logout / expiry / deactivation end the session, 429 after 10 failures, staff → 403 on admin routes. |
 | `catalog.test.ts` | Product validation, create / edit / hide, hidden products cannot be ordered, stock cannot go below held units (also when an order and a stock cut race), cost snapshot. |
 | `cash-log.test.ts` | Approval logs operator and amount in the same transaction; two staff at once → one payment; approve vs reject at once → never both; late approval still counted as cash. |
-| `reports.test.ts` | Exact revenue / profit / units / cash for a fixed week, India-day boundary (00:30 IST), zero days, date validation, PDF download and access rules. |
+| `reports.test.ts` | Exact revenue / profit / units / cash for a fixed week, India-day boundary (00:30 IST), zero days, date validation, PDF download and access rules; bill register rows (number, IST time, kiosk, UPI agent vs cash collector). |
+| `images.test.ts` | Any photo becomes a 512×512 WebP; the smart crop keeps the interesting part (fails with a plain centre crop); non-images, tiny and >8 MB files refused; admin only; link import refuses http, local and private addresses. |
+| `staff.test.ts` | Add / deactivate staff (logged out at once), kiosks, shifts in India time, overnight shifts, overlaps refused (also 5 admins at once: exactly one saved), orders stamped with kiosk and on-duty staff. |
+| `demo.test.ts` | Sample data is repeatable, replaces itself, is marked as sample, does not touch stock, and every bill names a person. |
 
 Browser tests (Playwright) drive the real screen; start the app first. They reset orders and stock in the app's database.
 
@@ -150,7 +153,29 @@ Local logins (from `docker-compose.yml`): **admin** `admin@kiosk.local` / `admin
 - **Daily PDF** (`/admin/reports/daily-pdf?date=YYYY-MM-DD`, admin): `pdfkit`, built from the same functions as the
   dashboard, so the numbers match. Amounts are written "Rs." because the built-in PDF font has no ₹ sign.
 - The portal (and its chart library) is loaded only on `/admin`, so the kiosk page stays small.
-- Not built: managing users from the UI (accounts come from env vars at start, or SQL), password reset.
+- **Smart image upload** (Products → product image): choose or drop a file, or paste a link to the picture. The server
+  (not the browser) reads the file to check it really is an image (JPEG / PNG / WebP / GIF / AVIF, at least 200×200, at most
+  8 MB), then `sharp` crops it to a **standard 512×512 WebP** with its "attention" strategy, which keeps the busiest, most
+  colourful part instead of always the middle. Images are stored in Postgres (`images` table, served at
+  `/api/images/:id`, cached as immutable) so they survive redeploys on hosts with a temporary disk. Products can only use
+  these standardized images, so every card looks alike. Link import is **https only**, refuses local / private addresses
+  (so it cannot be used to reach internal services), does not follow redirects, stops after 10 s or 8 MB, and explains
+  when a link is a web page rather than a picture (e.g. a Pinterest page link).
+- **Staff & duty** (admin): add staff accounts, add kiosks, and schedule **duty shifts** (kiosk, person, date, start/end in
+  India time; an end before the start runs past midnight). Two `EXCLUDE` constraints in Postgres refuse overlapping shifts,
+  even when two admins save at the same moment: one person per kiosk at a time, nobody at two kiosks at once.
+  Deactivating a person logs them out immediately. Staff see **My duty** (their upcoming shifts) when they log in.
+- **Kiosks on bills**: a kiosk screen opened as `/?kiosk=KSK-BLR-01` sends its code with each order. The order stores the
+  kiosk and **who was on duty there at that moment** (a snapshot), plus a sequential bill number (`BILL-000123`).
+- **Daily sales register PDF**: landscape A4, one row per bill (bill no., date, time IST, kiosk, items, qty, UPI / cash,
+  agent on duty or cash collector, amount), totals, summary cards, breakdowns by payment mode, kiosk, staff (with the cash
+  each person should hand over) and product, page numbers, and a proper ₹ sign (bundled DejaVu Sans font, licence in
+  `backend/assets/fonts`). If the day includes sample data, the header says so.
+- **Sample data for sharing**: `docker compose exec api npm run seed-demo` (or `SEED_DEMO_DATA=true` on first start)
+  creates 3 Bengaluru kiosks, 4 staff, a two-week duty roster and a week of UPI / cash sales. Repeatable (fixed random
+  seed), re-running replaces it, it never changes stock, and it is marked as sample (`demo_` payment ids, `.demo@` emails).
+  Locally the sample staff log in with `demo12345` (e.g. `priya.demo@kiosk.local`); elsewhere they get random passwords.
+- Not built: password reset, editing a shift (remove and add it again), and per-kiosk reports.
 
 ## What I would do next
 
@@ -162,7 +187,7 @@ Local logins (from `docker-compose.yml`): **admin** `admin@kiosk.local` / `admin
 
 ## How I checked it
 
-- 60 backend tests and 18 browser tests pass, also from a fresh `docker compose down -v && docker compose up --build`,
+- 80 backend tests and 20 browser tests pass, also from a fresh `docker compose down -v && docker compose up --build`,
   and the browser tests also pass against the production image (root `Dockerfile`, `NODE_ENV=production`).
 - The tests can fail: removing `FOR UPDATE` from `createOrder` makes the race tests fail (9 orders for 2 units), and
   the deadline test fails against the earlier webhook code. Likewise for the portal: removing the locked status check,

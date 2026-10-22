@@ -73,5 +73,9 @@ export async function seed() {
                     ('Roasted Peanuts', 'nuts', 1800)) AS v(name, category, cost)
       WHERE products.name = v.name AND products.cost_paise = 0`,
   );
+  // Every order belongs to a kiosk; make sure there is at least one.
+  await pool.query(
+    "INSERT INTO kiosks (code, name, location) SELECT 'KSK-01', 'Main counter', 'Ground floor' WHERE NOT EXISTS (SELECT 1 FROM kiosks)",
+  );
 
 }

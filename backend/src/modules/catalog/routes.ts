@@ -20,7 +20,11 @@ const fields = {
     .min(1)
     .max(30)
     .regex(/^[a-z0-9 -]+$/, "letters, numbers, spaces and dashes only"),
-  imageUrl: z.string().trim().url().max(500).startsWith("https://", "must be an https:// URL").nullable(),
+  // Only images that went through the smart upload (so every product photo is the same 512 x 512 square).
+  imageUrl: z
+    .string()
+    .regex(/^\/api\/images\/[0-9a-f-]{36}$/, "upload the image with the image picker")
+    .nullable(),
   active: z.boolean(),
 };
 

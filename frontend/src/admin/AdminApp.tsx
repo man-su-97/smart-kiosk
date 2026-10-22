@@ -5,13 +5,15 @@ import { CashQueue } from "./CashQueue";
 import { Dashboard } from "./Dashboard";
 import { Products } from "./Products";
 import { Reports } from "./Reports";
+import { TeamAndDuty } from "./TeamAndDuty";
 
-type Tab = "dashboard" | "products" | "cash" | "reports";
+type Tab = "dashboard" | "products" | "team" | "cash" | "reports";
 
 // Which tabs each role sees. This only hides buttons; the server checks the role on every call.
 const TABS: { id: Tab; label: string; roles: User["role"][] }[] = [
   { id: "dashboard", label: "Dashboard", roles: ["admin"] },
   { id: "products", label: "Products", roles: ["admin"] },
+  { id: "team", label: "Staff & duty", roles: ["admin"] },
   { id: "cash", label: "Cash queue", roles: ["admin", "staff"] },
   { id: "reports", label: "Reports", roles: ["admin"] },
 ];
@@ -73,6 +75,7 @@ export function AdminApp() {
 
       {tab === "dashboard" && <Dashboard />}
       {tab === "products" && <Products />}
+      {tab === "team" && <TeamAndDuty />}
       {tab === "cash" && <CashQueue />}
       {tab === "reports" && <Reports />}
     </div>

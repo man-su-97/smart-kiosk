@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { formatRupees } from "../api";
 import { ProductImage } from "../ProductImage";
+import { ImagePicker } from "./ImagePicker";
 import { createProduct, fetchAdminProducts, updateProduct, type AdminProduct } from "./adminApi";
 import { paiseToRupeesText, rupeesToPaise } from "./format";
 import { productSchema } from "./productSchema";
@@ -141,19 +142,19 @@ function ProductEditor({ product, categories, onClose, onSaved }: {
   return (
     <form onSubmit={save} className="card mb-5 animate-pop" aria-label={product ? "Edit product" : "New product"}>
       <h2 className="mb-3 text-xl font-extrabold">{product ? `Edit ${product.name}` : "New product"}</h2>
-      <div className="grid gap-3 md:grid-cols-[1fr_1fr_120px]">
+      <div className="grid gap-3 md:grid-cols-2">
         {field("name", "Name")}
         {field("category", "Category", { list: "categories" })}
-        <div className="row-span-2 flex items-center justify-center rounded-2xl bg-soft p-2">
-          <ProductImage name={draft.name || "snack"} imageUrl={draft.imageUrl.startsWith("https://") ? draft.imageUrl : null} className="size-24" />
-        </div>
         {field("price", "Price (₹)", { inputMode: "decimal" }, "pricePaise")}
         {field("cost", "Cost (₹)", { inputMode: "decimal" }, "costPaise")}
         {field("stock", "Stock (units)", { inputMode: "numeric" })}
-        {field("imageUrl", "Image URL (https, optional)")}
-        <label className="flex items-center gap-2 text-sm font-semibold">
+        <label className="flex items-center gap-2 self-end pb-3 text-sm font-semibold">
           <input type="checkbox" checked={draft.active} onChange={set("active")} className="size-5" /> On sale
         </label>
+        <div className="md:col-span-2">
+          <ImagePicker name={draft.name} value={draft.imageUrl || null} onChange={(url) => setDraft({ ...draft, imageUrl: url ?? "" })} />
+          {errors.imageUrl && <span className="text-sm text-bad">{errors.imageUrl}</span>}
+        </div>
       </div>
       <datalist id="categories">{categories.map((c) => <option key={c} value={c} />)}</datalist>
       {serverError && <p className="mt-3 font-bold text-bad">{serverError}</p>}

@@ -8,13 +8,15 @@
     "start": "tsx src/server.ts",
     "test": "vitest run",
     "send-webhook": "tsx scripts/send-webhook.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "seed-demo": "tsx scripts/seed-demo.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
     "express": "^5.1.0",
     "pdfkit": "^0.20.2",
     "pg": "^8.13.0",
+    "sharp": "^0.35.5",
     "zod": "^3.24.0"
   },
   "devDependencies": {

@@ -82,3 +82,65 @@ CREATE TABLE IF NOT EXISTS sessions (
 ALTER TABLE payment_events ADD COLUMN IF NOT EXISTS source      TEXT NOT NULL DEFAULT 'webhook';
 ALTER TABLE payment_events ADD COLUMN IF NOT EXISTS operator_id INTEGER REFERENCES users(id);
 ALTER TABLE payment_events ADD COLUMN IF NOT EXISTS outcome     TEXT;
+
+-- ---------------------------------------------------------------------------
+-- Smart image upload: every product photo is stored here already cropped to the same
+-- 512 x 512 square (WebP), so all product cards look alike. Kept in the database so it
+-- survives redeploys on hosts with a temporary disk.
+CREATE TABLE IF NOT EXISTS images (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  data            BYTEA NOT NULL,
+  content_type    TEXT NOT NULL,
+  original_width  INTEGER NOT NULL,
+  original_height INTEGER NOT NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Display name for people (shown on reports instead of the email).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS name TEXT;
+
+-- Kiosks (machines / counters).
+CREATE TABLE IF NOT EXISTS kiosks (
+  id       SERIAL PRIMARY KEY,
+  code     TEXT NOT NULL UNIQUE,
+  name     TEXT NOT NULL,
+  location TEXT NOT NULL DEFAULT '',
+  active   BOOLEAN NOT NULL DEFAULT true
+);
+-- CREATE TABLE IF NOT EXISTS never adds columns to an existing table, so list later columns again.
+ALTER TABLE kiosks ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT true;
+
+-- Duty roster: which staff member looks after which kiosk, and when.
+-- The two EXCLUDE constraints make the database itself refuse overlapping shifts, even when two
+-- admins save at the same moment: one person per kiosk at a time, and nobody at two kiosks at once.
+CREATE EXTENSION IF NOT EXISTS btree_gist;  -- lets "=" and "overlaps" be combined in one constraint
+CREATE TABLE IF NOT EXISTS kiosk_shifts (
+  id        SERIAL PRIMARY KEY,
+  kiosk_id  INTEGER NOT NULL REFERENCES kiosks(id),
+  user_id   INTEGER NOT NULL REFERENCES users(id),
+  starts_at TIMESTAMPTZ NOT NULL,
+  ends_at   TIMESTAMPTZ NOT NULL,
+  note      TEXT NOT NULL DEFAULT '',
+  CHECK (ends_at > starts_at),
+  CONSTRAINT one_staff_per_kiosk_at_a_time
+    EXCLUDE USING gist (kiosk_id WITH =, tstzrange(starts_at, ends_at) WITH &&),
+  CONSTRAINT one_kiosk_per_staff_at_a_time
+    EXCLUDE USING gist (user_id WITH =, tstzrange(starts_at, ends_at) WITH &&)
+);
+
+-- Which kiosk an order came from, and who was on duty there at the time
+-- (a snapshot, so changing the roster later does not change old bills).
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS kiosk_id      INTEGER REFERENCES kiosks(id);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS agent_user_id INTEGER REFERENCES users(id);
+
+-- Human-friendly bill number (BILL-000123). Created step by step instead of BIGSERIAL so the
+-- statements stay safe to run on every start; existing orders get numbers in creation order.
+CREATE SEQUENCE IF NOT EXISTS orders_bill_no_seq;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS bill_no BIGINT;
+ALTER TABLE orders ALTER COLUMN bill_no SET DEFAULT nextval('orders_bill_no_seq');
+ALTER SEQUENCE orders_bill_no_seq OWNED BY orders.bill_no;
+WITH base AS (SELECT COALESCE(MAX(bill_no), 0) AS last FROM orders),
+     todo AS (SELECT id, row_number() OVER (ORDER BY created_at) AS n FROM orders WHERE bill_no IS NULL)
+UPDATE orders SET bill_no = base.last + todo.n FROM base, todo WHERE orders.id = todo.id;
+SELECT setval('orders_bill_no_seq', COALESCE((SELECT MAX(bill_no) FROM orders), 0) + 1, false); -- next number
+CREATE UNIQUE INDEX IF NOT EXISTS orders_bill_no_key ON orders (bill_no);

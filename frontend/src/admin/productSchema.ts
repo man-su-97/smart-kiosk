@@ -16,7 +16,8 @@ export const productSchema = z
       .min(1, "Category is required")
       .max(30)
       .regex(/^[a-z0-9 -]+$/, "Letters, numbers, spaces and dashes only"),
-    imageUrl: z.string().trim().url("Not a valid URL").max(500).startsWith("https://", "Must start with https://").nullable(),
+    // Set by the image picker after the smart upload (always one of our own 512 x 512 images).
+    imageUrl: z.string().regex(/^\/api\/images\/[0-9a-f-]{36}$/, "Use the image picker").nullable(),
     active: z.boolean(),
   })
   .refine((p) => p.pricePaise < 1 || p.costPaise <= p.pricePaise, { message: "Cost cannot be higher than the price", path: ["costPaise"] });

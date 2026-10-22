@@ -121,3 +121,33 @@ describe("daily PDF report", () => {
     expect((await get("/admin/reports/daily-pdf?date=2026-13-01")).status).toBe(400);
   });
 });
+
+describe("bill register (PDF rows)", () => {
+  it("each bill has its number, India time, kiosk, payment mode and the right person", async () => {
+    const { bills } = await import("../src/modules/reports/service.js");
+    const { rows: kiosk } = await pool.query("INSERT INTO kiosks (code, name) VALUES ('KSK-T1', 'Test kiosk') RETURNING id");
+    const onDuty = await loginAs("staff", "duty@test.local");
+    const cashier = await loginAs("staff", "cashier@test.local");
+    await pool.query(
+      "INSERT INTO kiosk_shifts (kiosk_id, user_id, starts_at, ends_at) VALUES ($1, $2, now() - interval '1 hour', now() + interval '1 hour')",
+      [kiosk[0].id, onDuty.user.id],
+    );
+    const { rows: product } = await pool.query("SELECT id FROM products WHERE name = 'Chips'");
+    const order = (quantity: number) =>
+      api("/orders", { method: "POST", body: { items: [{ productId: product[0].id, quantity }], kioskCode: "KSK-T1" } }).then((r) => r.json());
+
+    const upi = await order(1);
+    await sendWebhook({ eventId: "evt_upi", orderId: upi.id, amountPaise: 2000 });
+    const cash = await order(2);
+    await api(`/orders/${cash.id}/cash-request`, { method: "POST" });
+    await api(`/admin/orders/${cash.id}/approve-cash`, { method: "POST", headers: cashier.headers });
+    await pool.query("UPDATE orders SET paid_at = '2026-10-10 19:45+05:30' WHERE id = ANY($1)", [[upi.id, cash.id]]);
+
+    const register = await bills({ from: "2026-10-10", to: "2026-10-10" });
+    expect(register.map((b) => [b.kioskCode, b.paymentMode, b.staff, b.amountPaise, b.time, b.date])).toEqual([
+      ["KSK-T1", "UPI", "duty@test.local", 2000, "07:45 PM", "10 Oct 2026"], // UPI: who was on duty
+      ["KSK-T1", "Cash", "cashier@test.local", 4000, "07:45 PM", "10 Oct 2026"], // cash: who took the money
+    ]);
+    expect(register.every((b) => /^BILL-\d{6}$/.test(b.billNo) && !b.demo)).toBe(true);
+  });
+});

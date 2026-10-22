@@ -10,6 +10,8 @@ import { adminRouter } from "./modules/admin/routes.js";
 import { authRouter } from "./modules/auth/routes.js";
 import { catalogRouter } from "./modules/catalog/routes.js";
 import { reportsRouter } from "./modules/reports/routes.js";
+import { imagesRouter } from "./modules/images/routes.js";
+import { staffRouter } from "./modules/staff/routes.js";
 
 export function createApp() {
   const app = express();
@@ -25,6 +27,7 @@ export function createApp() {
 
   // Payments first: it needs the raw body, so it must run before express.json().
   app.use(paymentsRouter);
+  app.use(imagesRouter); // also needs raw bodies (uploads)
   app.use(express.json());
   app.use(productsRouter);
   app.use(ordersRouter);
@@ -32,6 +35,7 @@ export function createApp() {
   app.use(adminRouter);
   app.use(catalogRouter);
   app.use(reportsRouter);
+  app.use(staffRouter);
 
   // Deployed: also serve the built React app (STATIC_DIR) from the same address. Any other
   // GET (/, /admin, /mock-pay) gets index.html and React picks the page from the URL.
@@ -47,8 +51,15 @@ export function createApp() {
   const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
     if (err instanceof HttpError) {
       res.status(err.status).json({ error: err.code, message: err.message, details: err.details });
-    } else if (err instanceof ZodError || err instanceof SyntaxError) {
+    } else if (err instanceof ZodError) {
+      // Say which field was wrong, so forms and API users can fix it.
+      const issue = err.issues[0];
+      res.status(400).json({ error: "BAD_REQUEST", message: `${issue.path.join(".") || "body"}: ${issue.message}` });
+    } else if (err instanceof SyntaxError) {
       res.status(400).json({ error: "BAD_REQUEST", message: "Invalid request body" });
+    } else if (typeof err.status === "number" && err.status >= 400 && err.status < 500) {
+      // Body parser errors, e.g. 413 when an upload is too big.
+      res.status(err.status).json({ error: "BAD_REQUEST", message: err.status === 413 ? "File too large" : err.message });
     } else {
       console.error(err);
       res.status(500).json({ error: "INTERNAL", message: "Something went wrong" });

@@ -2,10 +2,15 @@ import { createApp } from "./app.js";
 import { config } from "./config.js";
 import { migrate, seed, pool } from "./db/db.js";
 import { seedUsers } from "./modules/auth/service.js";
+import { hasDemoData, seedDemoData } from "./modules/demo/seedDemo.js";
 
 await migrate();
 await seed();
 await seedUsers();
+// Optional: fill an empty demo deployment with sample data (SEED_DEMO_DATA=true). Only once.
+if (process.env.SEED_DEMO_DATA === "true" && !(await hasDemoData())) {
+  await seedDemoData({ staffPassword: process.env.DEMO_STAFF_PASSWORD });
+}
 
 // Correctness does not depend on this: every query already checks expires_at.
 // This only writes the 'expired' status into the table so it is visible there.

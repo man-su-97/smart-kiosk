@@ -17,7 +17,7 @@ const valid = {
   costPaise: 2500,
   stock: 10,
   category: "Chips",
-  imageUrl: "https://example.com/nachos.png",
+  imageUrl: null as string | null,
 };
 const create = (body: unknown, headers = admin) => api("/admin/products", { method: "POST", body, headers });
 const update = (id: number, body: unknown, headers = admin) =>
@@ -31,7 +31,7 @@ describe("product catalog", () => {
     expect(created).toMatchObject({ name: "Nachos", category: "chips", costPaise: 2500, available: 10, active: true });
 
     const [kiosk] = await getProducts();
-    expect(kiosk).toMatchObject({ id: created.id, name: "Nachos", category: "chips", imageUrl: valid.imageUrl });
+    expect(kiosk).toMatchObject({ id: created.id, name: "Nachos", category: "chips", imageUrl: null });
     expect(kiosk).not.toHaveProperty("costPaise");
   });
 
@@ -40,8 +40,8 @@ describe("product catalog", () => {
       { ...valid, pricePaise: 0 },
       { ...valid, pricePaise: 49.5 }, // paise must be whole numbers
       { ...valid, stock: -1 },
-      { ...valid, imageUrl: "http://example.com/x.png" }, // https only
-      { ...valid, imageUrl: "not a url" },
+      { ...valid, imageUrl: "https://example.com/x.png" }, // outside links: must go through the image upload
+      { ...valid, imageUrl: "/api/images/not-a-uuid" },
       { ...valid, category: "<script>" },
       { ...valid, costPaise: 6000 }, // cost above price
       { ...valid, discount: 10 }, // unknown field

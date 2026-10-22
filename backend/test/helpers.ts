@@ -24,7 +24,7 @@ export async function stopApp() {
 // Empty every table so each test starts clean.
 export async function resetDb() {
   await pool.query(
-    "TRUNCATE payment_events, order_items, orders, products, sessions, users RESTART IDENTITY CASCADE",
+    "TRUNCATE payment_events, order_items, orders, products, sessions, kiosk_shifts, kiosks, images, users RESTART IDENTITY CASCADE",
   );
 }
 

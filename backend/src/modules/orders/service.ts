@@ -5,7 +5,7 @@ import { getHeldUnits } from "../products/service.js";
 
 type Item = { productId: number; quantity: number };
 
-export async function createOrder(requested: Item[]) {
+export async function createOrder(requested: Item[], kioskCode?: string) {
   // If the same product appears twice, add the quantities together.
   const wanted = new Map<number, number>();
   for (const { productId, quantity } of requested) {
@@ -27,6 +27,22 @@ export async function createOrder(requested: Item[]) {
       throw new HttpError(400, "UNKNOWN_PRODUCT", "One or more products do not exist");
     }
 
+    // Which kiosk is selling, and which staff member is on duty there right now (from the roster);
+    // both are saved on the order for the bill. No code = the first kiosk, so a single-kiosk
+    // setup needs no configuration. The roster allows at most one person per kiosk at a time.
+    const { rows: kiosks } = await tx.query(
+      `SELECT k.id,
+              (SELECT s.user_id FROM kiosk_shifts s
+                WHERE s.kiosk_id = k.id AND tstzrange(s.starts_at, s.ends_at) @> clock_timestamp()) AS agent_user_id
+         FROM kiosks k
+        WHERE k.active AND ($1::text IS NULL OR k.code = $1)
+        ORDER BY k.id
+        LIMIT 1`,
+      [kioskCode ?? null],
+    );
+    if (kioskCode && kiosks.length === 0) throw new HttpError(400, "UNKNOWN_KIOSK", `No kiosk with code ${kioskCode}`);
+    const kiosk = kiosks[0] ?? { id: null, agent_user_id: null };
+
     const held = await getHeldUnits(tx, productIds);
     const shortages: { productId: number; requested: number; available: number }[] = [];
     let totalPaise = 0;
@@ -42,10 +58,10 @@ export async function createOrder(requested: Item[]) {
     }
 
     const { rows } = await tx.query(
-      `INSERT INTO orders (status, total_paise, expires_at)
-       VALUES ('pending', $1, clock_timestamp() + make_interval(secs => $2))
+      `INSERT INTO orders (status, total_paise, expires_at, kiosk_id, agent_user_id)
+       VALUES ('pending', $1, clock_timestamp() + make_interval(secs => $2), $3, $4)
        RETURNING id`,
-      [totalPaise, config.holdSeconds],
+      [totalPaise, config.holdSeconds, kiosk.id, kiosk.agent_user_id],
     );
     const id: string = rows[0].id;
     for (const p of products) {

@@ -23,6 +23,8 @@ services:
         generateValue: true
       - key: ENABLE_PAYMENT_SIMULATOR # demo: lets the QR page / Simulate button pay (fake money)
         value: "true"
+      - key: SEED_DEMO_DATA # demo: on first start, add sample kiosks, staff roster and a week of sales
+        value: "true"     # (marked as sample everywhere; sample staff get random passwords)
 
 databases:
   - name: smart-kiosk-db

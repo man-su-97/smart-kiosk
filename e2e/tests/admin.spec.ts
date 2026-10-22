@@ -28,7 +28,7 @@ test("the session survives a reload and logout ends it", async ({ page }) => {
 
 test("admin dashboard shows KPIs and both charts", async ({ page }) => {
   await loginToPortal(page, "admin");
-  await expect(page.getByRole("tab")).toHaveText(["Dashboard", "Products", "Cash queue", "Reports"]);
+  await expect(page.getByRole("tab")).toHaveText(["Dashboard", "Products", "Staff & duty", "Cash queue", "Reports"]);
   await expect(page.getByTestId("kpi")).toHaveCount(4);
   await expect(page.getByTestId("chart-daily").locator("svg.recharts-surface")).toBeVisible();
   await expect(page.getByTestId("chart-categories").locator("svg.recharts-surface")).toBeVisible();
@@ -80,4 +80,86 @@ test("admin downloads the daily PDF report", async ({ page }) => {
   const stream = await download.createReadStream();
   const first = await new Promise<Buffer>((resolve) => stream.once("data", (chunk) => resolve(chunk as Buffer)));
   expect(first.subarray(0, 5).toString()).toBe("%PDF-");
+});
+
+test("smart upload: a wide photo becomes a 512 x 512 square on the product and the kiosk", async ({ page, context }) => {
+  const name = `Photo snack ${Date.now()}`;
+  await loginToPortal(page, "admin");
+  await page.getByRole("tab", { name: "Products" }).click();
+  await page.getByRole("button", { name: "+ Add product" }).click();
+  const form = page.getByRole("form", { name: "New product" });
+  await form.getByLabel("Name").fill(name);
+  await form.getByLabel("Category").fill("chips");
+  await form.getByLabel("Price (₹)").fill("40");
+  await form.getByLabel("Stock (units)").fill("5");
+
+  await form.getByLabel("Image file").setInputFiles(new URL("../fixtures/snack-photo.jpg", import.meta.url).pathname);
+  await expect(form.getByTestId("image-info")).toHaveText("✓ 1200×800 → standard 512×512 (smart-cropped to a square)");
+
+  // A link to a web page (not a picture) is explained, not silently ignored.
+  await form.getByLabel("Image link").fill("http://example.com/page");
+  await form.getByRole("button", { name: "Import" }).click();
+  await expect(form.getByText("Only https:// links can be imported")).toBeVisible();
+
+  await form.getByRole("button", { name: "Save" }).click();
+  const row = page.getByTestId("product-row").filter({ hasText: name });
+  await expect(row.locator("img")).toHaveAttribute("src", /^\/api\/images\/[0-9a-f-]{36}$/);
+
+  const kiosk = await context.newPage();
+  await kiosk.goto("/");
+  const img = kiosk.getByTestId("product").filter({ hasText: name }).locator("img");
+  await expect(img).toBeVisible();
+  expect(await img.evaluate((el: HTMLImageElement) => [el.naturalWidth, el.naturalHeight])).toEqual([512, 512]);
+
+  await row.getByRole("button", { name: "Hide" }).click(); // tidy up for the other tests
+});
+
+test("admin adds staff and a kiosk, schedules duty; overlaps are refused; staff see their duty", async ({ page, browser }) => {
+  const stamp = Date.now();
+  const kioskCode = `E2E-${stamp % 100000}`;
+  const email = `e2e-${stamp}@kiosk.local`;
+  const tomorrow = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date(Date.now() + 86_400_000));
+
+  await loginToPortal(page, "admin");
+  await page.getByRole("tab", { name: "Staff & duty" }).click();
+
+  const people = page.getByRole("form", { name: "New staff member" });
+  await people.getByLabel("Full name").fill("Kavya Test");
+  await people.getByLabel("Staff email").fill(email);
+  await people.getByLabel("Staff password").fill("kavya-pass-1");
+  await people.getByRole("button", { name: "Add" }).click();
+  await expect(page.getByTestId("person-row").filter({ hasText: email })).toContainText("Kavya Test");
+
+  const kiosks = page.getByRole("form", { name: "New kiosk" });
+  await kiosks.getByLabel("Kiosk code").fill(kioskCode);
+  await kiosks.getByLabel("Kiosk name").fill("Test Counter");
+  await kiosks.getByRole("button", { name: "Add" }).click();
+  await expect(page.getByTestId("kiosk-row").filter({ hasText: kioskCode })).toContainText("Nobody on duty");
+
+  const shift = page.getByRole("form", { name: "New shift" });
+  const book = async (start: string, end: string) => {
+    await shift.getByLabel("Kiosk").selectOption({ label: `${kioskCode} · Test Counter` });
+    await shift.getByLabel("Staff member").selectOption({ label: "Kavya Test" });
+    await shift.getByLabel("Date").fill(tomorrow);
+    await shift.getByLabel("Start").fill(start);
+    await shift.getByLabel("End").fill(end);
+    await shift.getByRole("button", { name: "Add shift" }).click();
+  };
+  await page.getByTestId("roster").getByLabel("Week from").fill(tomorrow);
+  await book("09:00", "17:00");
+  await expect(page.getByTestId("shift-row").filter({ hasText: kioskCode })).toContainText("09:00–17:00");
+
+  await book("16:00", "20:00"); // overlaps: this kiosk already has someone from 09:00 to 17:00
+  await expect(page.getByText("Someone is already on duty at this kiosk during those hours")).toBeVisible();
+
+  // Kavya logs in (separate browser) and sees her duty.
+  const staffContext = await browser.newContext();
+  const staffPage = await staffContext.newPage();
+  await staffPage.goto("/admin");
+  await staffPage.getByLabel("Email").fill(email);
+  await staffPage.getByLabel("Password").fill("kavya-pass-1");
+  await staffPage.getByRole("button", { name: "Log in" }).click();
+  await expect(staffPage.getByTestId("my-duty")).toContainText(`${kioskCode} · Test Counter`);
+  await expect(staffPage.getByTestId("my-duty")).toContainText("09:00–17:00");
+  await staffContext.close();
 });

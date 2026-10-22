@@ -8,14 +8,17 @@ const itemSchema = z.object({
   productId: z.number().int().positive(),
   quantity: z.number().int().positive().max(50),
 });
-const createOrderSchema = z.object({ items: z.array(itemSchema).min(1) });
+const createOrderSchema = z.object({
+  items: z.array(itemSchema).min(1),
+  kioskCode: z.string().trim().min(1).max(30).optional(), // which kiosk is selling (optional)
+});
 const idSchema = z.string().uuid();
 
 ordersRouter.post("/orders", async (req, res) => {
   // Accept either [{productId, quantity}] or { items: [...] }.
   const body = Array.isArray(req.body) ? { items: req.body } : req.body;
-  const { items } = createOrderSchema.parse(body);
-  res.status(201).json(await createOrder(items));
+  const { items, kioskCode } = createOrderSchema.parse(body);
+  res.status(201).json(await createOrder(items, kioskCode));
 });
 
 ordersRouter.get("/orders/:id", async (req, res) => {

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { CartLine, Order } from "./api";
+import { kioskCode, type CartLine, type Order } from "./api";
 import { ProductList } from "./ProductList";
 import { PaymentScreen } from "./PaymentScreen";
 
@@ -11,6 +11,7 @@ export function App() {
     <div className="mx-auto min-h-screen max-w-[1040px]">
       <header className="flex items-center gap-2.5 px-6 py-[18px] text-[22px] font-extrabold tracking-tight">
         <span className="grid size-10 place-items-center rounded-xl bg-brand text-[22px]">🥨</span> Snack Kiosk
+        {kioskCode && <span className="ml-1 rounded-full bg-soft px-3 py-1 text-sm font-semibold text-muted">{kioskCode}</span>}
       </header>
       <main className="px-6 pb-36">
         {placed ? (

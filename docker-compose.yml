@@ -27,6 +27,7 @@ services:
       ADMIN_PASSWORD: admin12345
       STAFF_EMAIL: staff@kiosk.local
       STAFF_PASSWORD: staff12345
+      DEMO_STAFF_PASSWORD: demo12345   # sample staff from `npm run seed-demo` (local only)
     ports:
       - "3000:3000"
     depends_on:
