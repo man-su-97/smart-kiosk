@@ -26,6 +26,20 @@ Try the flow:
 
 The webhook secret is `WEBHOOK_SECRET` (`dev-webhook-secret` in `docker-compose.yml`).
 
+## Deploy (free, Render) — `deploy` branch only
+
+One service: the root `Dockerfile` builds the React app and Express serves it together with the API under `/api`.
+`render.yaml` creates that free web service plus a free Postgres, with `WEBHOOK_SECRET` and `ADMIN_TOKEN` generated.
+
+1. Render dashboard → **New → Blueprint** → this repo, branch `deploy` → **Apply**.
+2. Open the service URL. Read `WEBHOOK_SECRET` / `ADMIN_TOKEN` under the service's **Environment** tab.
+3. Pay from your machine: `cd backend && API_URL=https://<service>.onrender.com/api WEBHOOK_SECRET=<secret> npm run send-webhook -- <orderId> <amountPaise>`
+
+Free-plan limits: the service sleeps after 15 idle minutes (first request then takes about a minute) and the free
+database expires 30 days after creation. For a longer-lived database, create a free Neon Postgres and set
+`DATABASE_URL` to its connection string (with `?sslmode=require`). The demo payment simulator is on, so anyone with
+an order's link can "pay" it with fake money.
+
 ## Run the tests
 
 Backend tests run against a **real PostgreSQL** database (`pickup_test`, created by `docker compose`):

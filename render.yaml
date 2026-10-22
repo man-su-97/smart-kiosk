@@ -1,0 +1,28 @@
+# Render Blueprint: one free web service (Docker) + one free Postgres.
+# In Render: New -> Blueprint -> pick this repo and the `deploy` branch.
+services:
+  - type: web
+    name: smart-kiosk
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/products
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: smart-kiosk-db
+          property: connectionString
+      - key: WEBHOOK_SECRET # read it in the Render dashboard to run send-webhook against the live app
+        generateValue: true
+      - key: ADMIN_TOKEN # the /admin password; read it in the Render dashboard
+        generateValue: true
+      - key: ENABLE_PAYMENT_SIMULATOR # demo: lets the QR page / Simulate button pay (fake money)
+        value: "true"
+
+databases:
+  - name: smart-kiosk-db
+    plan: free # note: Render's free Postgres expires 30 days after creation
+    region: singapore
+    databaseName: pickup
+    postgresMajorVersion: "16"

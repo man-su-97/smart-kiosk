@@ -10,6 +10,8 @@ export const config = {
   paymentSimulator: process.env.ENABLE_PAYMENT_SIMULATOR === "true",
   // Password for the operator (/admin) endpoints that approve cash. Change it outside the demo.
   adminToken: process.env.ADMIN_TOKEN ?? "demo-admin-token",
+  // Deployed only: folder with the built frontend, served by Express. Unset locally.
+  staticDir: process.env.STATIC_DIR,
   // How long an unpaid order holds its stock.
   holdSeconds: Number(process.env.HOLD_SECONDS ?? 120),
 };
