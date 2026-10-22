@@ -1,7 +1,7 @@
 # AI notes
 
 ## Tools used
-Claude Code (Claude Sonnet 5.5) in the terminal. It planned the design, wrote the backend, tests,
+Claude Code in the terminal (Claude Sonnet 5.5, later Claude Opus 5.5). It planned the design, wrote the backend, tests,
 frontend and README, and ran the installs, tests and the manual docker flow. I reviewed the design
 decisions (especially the late-payment rule) and the code before submitting.
 
@@ -37,5 +37,10 @@ lock is visible in the SQL, which is what I need to be able to explain live.
    check only re-checked stock for orders that were `expired` or past their deadline. A payment arriving for a cancelled
    order (whose units were already released) would have been marked paid without checking stock, i.e. possibly oversold.
    Changed it to "re-check unless the hold is still valid", and added a test; with the old line back, that test fails.
-7. Smaller: the first draft typed transaction parameters with an unreadable `Parameters<Parameters<…>>` expression;
+7. **Bugs in its own code, found only when asked to attack it.** An adversarial review prompt ("you are a cynical
+   QA engineer…") turned up a webhook race at the 120 s deadline that could sell a unit twice, and an API crash on a
+   database restart (reproduced with `docker compose restart db`). While fixing the crash, a new test that kills a
+   connection mid-transaction exposed a second crash path the first fix missed (an `error` event on a checked-out
+   client). The race test was confirmed to fail against the old code before keeping it.
+8. Smaller: the first draft typed transaction parameters with an unreadable `Parameters<Parameters<…>>` expression;
    replaced with a plain `Tx` type.

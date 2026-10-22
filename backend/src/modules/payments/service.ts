@@ -45,11 +45,9 @@ export async function processWebhook(event: WebhookEvent): Promise<WebhookResult
     if (inserted.rowCount === 0) return "duplicate";
 
     // Lock the order so a webhook and a pickup (or two webhooks) cannot interleave.
-    const { rows } = await tx.query(
-      `SELECT id, status, total_paise, expires_at <= clock_timestamp() AS past_deadline
-         FROM orders WHERE id = $1 FOR UPDATE`,
-      [event.orderId],
-    );
+    const { rows } = await tx.query("SELECT id, status, total_paise FROM orders WHERE id = $1 FOR UPDATE", [
+      event.orderId,
+    ]);
     if (rows.length === 0) return "order_not_found";
     const order = rows[0];
 
@@ -63,11 +61,22 @@ export async function processWebhook(event: WebhookEvent): Promise<WebhookResult
       return "needs_review";
     }
 
+    // Lock this order's products BEFORE looking at the clock. createOrder decides "is that
+    // hold expired?" while holding these same locks, so we must decide while holding them too.
+    // Otherwise: we check at 119.999 s ("still valid"), a new order locks the products at
+    // 120.001 s, sees our order as expired and takes the units, then we commit "paid": sold twice.
+    // Lock order is always order -> products (same as claimPickup), so no deadlock.
+    const { items, products } = await lockProductsOf(tx, order.id);
+    const { rows: deadline } = await tx.query(
+      "SELECT expires_at <= clock_timestamp() AS past FROM orders WHERE id = $1",
+      [order.id],
+    );
+
     // Are this order's units still reserved for it? Only while it is unpaid and inside its
     // 120 s window. An expired or cancelled order has released them, so re-check the stock.
     const holdStillValid =
-      (order.status === "pending" || order.status === "pending_cash_approval") && !order.past_deadline;
-    if (!holdStillValid && !(await canStillFulfil(tx, order.id))) {
+      (order.status === "pending" || order.status === "pending_cash_approval") && !deadline[0].past;
+    if (!holdStillValid && !(await canStillFulfil(tx, items, products))) {
       // Money arrived but the units were sold to someone else meanwhile.
       await markNeedsReview(tx, order.id, "LATE_PAYMENT_STOCK_GONE");
       return "needs_review";
@@ -86,20 +95,27 @@ async function markNeedsReview(tx: Tx, id: string, reason: string) {
   ]);
 }
 
-// For a late payment: are the units still free? Lock the products first, the same
-// way createOrder does, so nobody can grab them while we check.
-async function canStillFulfil(tx: Tx, orderId: string) {
-  const { rows: items } = await tx.query(
+type Item = { product_id: number; quantity: number };
+type LockedProduct = { id: number; stock: number };
+
+// Lock the order's product rows, sorted by id like createOrder, and return them.
+async function lockProductsOf(tx: Tx, orderId: string) {
+  const { rows: items } = await tx.query<Item>(
     "SELECT product_id, quantity FROM order_items WHERE order_id = $1 ORDER BY product_id",
     [orderId],
   );
-  const ids = items.map((i) => i.product_id as number);
-  const { rows: products } = await tx.query(
+  const { rows: products } = await tx.query<LockedProduct>(
     "SELECT id, stock FROM products WHERE id = ANY($1) ORDER BY id FOR UPDATE",
-    [ids],
+    [items.map((i) => i.product_id)],
   );
+  return { items, products };
+}
+
+// For a late payment: are the units still free? The product rows are already locked,
+// so nobody can grab them while we check.
+async function canStillFulfil(tx: Tx, items: Item[], products: LockedProduct[]) {
   // This order's hold is over (expired or cancelled), so it is not counted in `held`.
-  const held = await getHeldUnits(tx, ids);
+  const held = await getHeldUnits(tx, items.map((i) => i.product_id));
   return items.every((item) => {
     const stock = products.find((p) => p.id === item.product_id)!.stock as number;
     return stock - (held.get(item.product_id) ?? 0) >= item.quantity;

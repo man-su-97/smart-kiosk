@@ -1,3 +1,4 @@
+
 # Pickup Counter
 
 A self-service snack counter: pick items, pay by UPI (simulated) or cash (operator-approved), collect from a locker.
@@ -61,9 +62,10 @@ Set `TEST_DATABASE_URL` to use a different database. What they prove:
 | Test file | What it proves |
 |---|---|
 | `orders.test.ts` | 10 simultaneous buyers for the last 2 units → exactly 2 succeed, 8 get 409, `available` ends at 0. A too-large order holds nothing. Expired hold frees stock. A repeated-race test (20 buyers × 15 rounds) fails if the row lock is removed. |
-| `webhook.test.ts` | Bad signature → 401. Same event twice (and 5× at once) → processed once. Wrong amount → `needs_review`. Late payment cases. |
+| `webhook.test.ts` | Bad signature → 401. Same event twice (and 5× at once) → processed once. Wrong amount → `needs_review`. Late payment cases. Out-of-range amount / 200-char event id / unknown status → 400 with nothing written. |
 | `pickup.test.ts` | 2 (and 10) simultaneous claims → exactly one 200, the rest 409, stock reduced once. Unpaid/expired → 409. |
 | `cash-and-mock-upi.test.ts` | Mock UPI pays once and is 404 when the simulator is off. Cash request keeps the hold; admin needs the token; approve → paid (two operators at once → paid once); reject → cancelled and stock released; a payment for a cancelled order re-checks stock (never oversells). |
+| `hardening.test.ts` | Webhook at the deadline waits for an in-flight product lock and then decides (forced with a real lock, not timing luck). A connection killed mid-transaction surfaces the real error and the pool keeps working. The pool has an error listener. |
 
 ### Browser (end-to-end) tests
 
@@ -140,6 +142,39 @@ response is built. The browser counts that number down with `performance.now()` 
 wall-clock setting) in `frontend/src/useCountdown.ts`. Each poll (every 2 s) restarts it with a fresh server value.
 The browser's date/time is never read. Small error: network delay (a fraction of a second) is not subtracted.
 
+## Production Hardening & Concurrency Fixes
+
+Found by an adversarial review of this code; each fix has a test that fails without it.
+
+**1. Webhook deadline race (stock sold twice at 120 s).**
+`createOrder` decides whether another order's hold has expired *while holding the product row locks*. The webhook used
+to check the deadline *without* them: it could see "still valid" at 119.999 s, then a new order locks the products at
+120.001 s, counts our order as expired and takes the units, and the webhook commits "paid", so one unit is sold twice.
+Now `processWebhook` locks the order's products (`SELECT … FROM products WHERE id = ANY(…) ORDER BY id FOR UPDATE`)
+**before** reading the clock, so the two decisions are serialised by the same locks. Lock order is always
+order → products (like `claimPickup`), and `createOrder` only locks products, so there is no deadlock cycle.
+`hardening.test.ts` reproduces the interleaving with a real held lock; against the old code it fails.
+
+**2. PostgreSQL pool resilience (API crashed on a database restart).**
+Reproduced: `docker compose restart db` killed the API (`Emitted 'error' event on BoundPool`, exit 1).
+- `pool.on("error", …)` logs errors from idle connections instead of letting Node treat them as fatal.
+- `withTransaction` also listens on the checked-out client while it is in use. The test above found that a connection
+  dying *between two queries* of a transaction emits `error` on the client itself and crashed the process the same way.
+- If the socket is dead, `ROLLBACK` fails too. That failure is swallowed so the caller sees the real error, and
+  `client.release(true)` destroys the client instead of handing a dead socket to the next request.
+  (Postgres rolls back an unfinished transaction on disconnect anyway, so nothing half-done is kept.)
+
+**3. Input sanitisation and Zod bounds (500 errors forever on odd webhooks).**
+Reproduced: `amountPaise: 3000000000` passed `z.number().int()` but overflowed the `INTEGER` column, so every retry got a 500.
+The webhook schema now matches the columns: `amountPaise` int 0…2,147,483,647, `eventId` 1–128 chars,
+`orderId` uuid, `status` one of `captured | failed | pending | refunded`. Validation runs after the signature check,
+so a bad payload is a 400 and nothing is written. Note: an unknown status is now a 400 (before it was recorded and ignored).
+
+**4. Self-healing container.**
+`api` has `restart: unless-stopped` in `docker-compose.yml`. Checked by killing the Node process inside the container:
+Docker restarted it and the API served again. With fix 2 the API no longer exits on a database restart at all;
+this is the safety net for anything else.
+
 ## Decision: payment arrives after the hold expired
 
 Chosen behaviour: **re-check the stock at that moment.**
@@ -158,7 +193,8 @@ Trade-off: a late payer can "win" units that were released, as long as nobody el
 - `POST /orders` accepts `{ "items": [{productId, quantity}] }` or a bare array. Duplicate product lines are merged.
 - Stock errors return **409** `INSUFFICIENT_STOCK` with per-product `requested`/`available`.
 - A valid signed webhook always returns 200, including repeats, so a real provider would stop retrying.
-  Unknown order ids are recorded and ignored. Non-`captured` statuses are recorded and ignored.
+  Unknown order ids are recorded and ignored. `failed` / `pending` / `refunded` are recorded and ignored (no refunds);
+  any other status, or an out-of-range field, is a 400.
 - Pickup: unknown order → 404; unpaid / expired / needs_review / already claimed → 409.
 - No authentication on the locker endpoint, no refunds, a single API instance (the expiry job is per instance, but harmless if repeated).
 - The web container runs the Vite dev server with a proxy (`/api` → API) to keep the setup simple.
@@ -170,8 +206,18 @@ Trade-off: a late payer can "win" units that were released, as long as nobody el
 - Run the same concurrency tests against more parallel API instances.
 - Build the frontend for production (static files) instead of the dev server.
 - Component tests for the countdown (fake timers, shifted system clock).
+- Remaining review findings, not fixed yet:
+  - a cash approval after the hold expired is refused (the order leaves `/admin` at expiry), so late cash has no path
+  - approve and reject can race, because `approveCash` checks the status outside the lock
+  - a second payment for an already-paid order is kept without being flagged for refund
+  - no rate limit on `POST /orders` (stock can be held by a script), and the 50-per-line cap can be bypassed by repeating a line
+  - no connection, statement or lock timeouts
+  - secrets fall back to dev defaults if env vars are missing
+  - Postgres port published on all interfaces
 
 ## How I checked it
 
-Automated tests above (real Postgres, 27 tests, 13 browser tests) plus the manual flow in "Run it" (order → webhook → repeat webhook → two parallel claims returned 200 and 409).
-I also checked the tests can fail: removing `FOR UPDATE` from `createOrder` makes the stock tests fail (orders oversold). See `AI_NOTES.md` for the AI usage notes.
+Automated tests above (real Postgres, 31 tests, 13 browser tests) plus the manual flow in "Run it" (order → webhook → repeat webhook → two parallel claims returned 200 and 409).
+I also checked the tests can fail: removing `FOR UPDATE` from `createOrder` makes the stock tests fail (orders oversold),
+and the deadline-race test fails against the previous `processWebhook`. `docker compose restart db` now leaves the API up
+and serving (it used to crash). See `AI_NOTES.md` for the AI usage notes.

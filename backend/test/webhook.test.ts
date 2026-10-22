@@ -49,6 +49,23 @@ describe("payment webhook", () => {
     expect(await getOrderStatus(order.id)).toBe("paid");
   });
 
+  it("rejects out-of-range or malformed payloads with 400 and records nothing", async () => {
+    const productId = await addProduct(3, 1500);
+    const order = await orderOf(productId, 1);
+    const bad = [
+      { eventId: "evt_big", orderId: order.id, amountPaise: 3_000_000_000 }, // bigger than Postgres INTEGER
+      { eventId: "evt_neg", orderId: order.id, amountPaise: -1 },
+      { eventId: "x".repeat(200), orderId: order.id, amountPaise: 1500 },
+      { eventId: "evt_status", orderId: order.id, amountPaise: 1500, status: "weird" },
+    ];
+    for (const event of bad) {
+      expect((await sendWebhook(event)).status).toBe(400);
+    }
+    const { rows } = await pool.query("SELECT count(*)::int AS n FROM payment_events");
+    expect(rows[0].n).toBe(0);
+    expect(await getOrderStatus(order.id)).toBe("pending");
+  });
+
   it("a wrong amount is not marked paid but needs_review", async () => {
     const productId = await addProduct(3, 1500);
     const order = await orderOf(productId, 1);

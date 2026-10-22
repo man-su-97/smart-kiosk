@@ -7,11 +7,13 @@ import { payInternally, processWebhook } from "./service.js";
 
 export const paymentsRouter = Router();
 
-const eventSchema = z.object({
-  eventId: z.string().min(1),
+// Bounds match the database columns, so a strange payload is a clean 400 instead of a
+// Postgres error (500) that the provider would keep retrying forever.
+const webhookSchema = z.object({
+  eventId: z.string().min(1).max(128),
   orderId: z.string().uuid(),
-  amountPaise: z.number().int(),
-  status: z.string(),
+  amountPaise: z.number().int().min(0).max(2_147_483_647), // Postgres INTEGER limit
+  status: z.enum(["captured", "failed", "pending", "refunded"]),
 });
 
 // Mock UPI: the phone page opened from the QR code (or the "Simulate" button) calls this.
@@ -34,7 +36,7 @@ paymentsRouter.post(
       throw new HttpError(401, "INVALID_SIGNATURE", "Signature does not match");
     }
 
-    const event = eventSchema.parse(JSON.parse(rawBody.toString("utf8")));
+    const event = webhookSchema.parse(JSON.parse(rawBody.toString("utf8")));
     const result = await processWebhook(event);
     // Always 200 for a valid signed event (including repeats) so the provider stops retrying.
     res.json({ result });

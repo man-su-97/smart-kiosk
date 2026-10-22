@@ -4,6 +4,13 @@ import { config } from "../config.js";
 
 export const pool = new pg.Pool({ connectionString: config.databaseUrl, max: 20 });
 
+// When Postgres restarts it kills idle connections and the pool emits 'error'. With no
+// listener Node treats that as an unhandled error and the whole API process exits.
+// Logging it is enough: the pool drops the dead client and opens a new one on next use.
+pool.on("error", (err) => {
+  console.error("Unexpected error on idle PostgreSQL client", err);
+});
+
 // Either the pool (one-off query) or a client inside a transaction.
 export type Tx = pg.PoolClient;
 export type Db = pg.Pool | Tx;
@@ -12,16 +19,30 @@ export type Db = pg.Pool | Tx;
 // so a failed order never leaves a half-made hold behind.
 export async function withTransaction<T>(work: (tx: pg.PoolClient) => Promise<T>): Promise<T> {
   const client = await pool.connect();
+  let broken = false;
+  // The pool's listener only covers idle clients. A checked-out client that loses its
+  // connection between two queries emits 'error' on itself, which would also crash the
+  // process. Note it here; the next query on this client fails and lands in `catch`.
+  const onLostConnection = (err: Error) => {
+    broken = true;
+    console.error("PostgreSQL connection lost during a transaction", err);
+  };
+  client.on("error", onLostConnection);
   try {
     await client.query("BEGIN");
     const result = await work(client);
     await client.query("COMMIT");
     return result;
   } catch (err) {
-    await client.query("ROLLBACK");
+    // If the connection died, ROLLBACK fails too. Swallow that so the caller sees the
+    // real error, and remember the client is broken (Postgres rolls back on disconnect anyway).
+    await client.query("ROLLBACK").catch(() => {
+      broken = true;
+    });
     throw err;
   } finally {
-    client.release();
+    client.off("error", onLostConnection);
+    client.release(broken); // true = destroy this client instead of reusing a dead socket
   }
 }
 
