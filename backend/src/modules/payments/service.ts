@@ -1,4 +1,5 @@
 import { pool, withTransaction, type Tx } from "../../db/db.js";
+import { config } from "../../config.js";
 import { HttpError } from "../../errors.js";
 import { getHeldUnits } from "../products/service.js";
 
@@ -10,12 +11,17 @@ export type WebhookEvent = {
 };
 
 export type WebhookResult =
-  "duplicate" | "order_not_found" | "ignored" | "already_paid" | "paid" | "needs_review";
+  | "duplicate" // the same event again: nothing to do
+  | "duplicate_payment" // a different payment for an order that is already paid: money to refund
+  | "order_not_found"
+  | "ignored"
+  | "paid"
+  | "needs_review";
 
 export type PaymentOptions = {
   source?: "webhook" | "mockupi" | "cash";
   operatorId?: number; // the staff member who took the cash
-  requireStatus?: string; // only pay if the order is in this status (checked under the lock)
+  cashApproval?: boolean; // staff approving cash: only for orders waiting for cash (checked under the lock)
 };
 
 // Payments that do not come from the bank webhook: the mock UPI page ("mockupi") and staff
@@ -73,21 +79,35 @@ export async function processWebhook(
 
 async function applyPayment(tx: Tx, event: WebhookEvent, options: PaymentOptions): Promise<WebhookResult> {
   // Lock the order so a webhook and a pickup (or two webhooks) cannot interleave.
-  const { rows } = await tx.query("SELECT id, status, total_paise FROM orders WHERE id = $1 FOR UPDATE", [
-    event.orderId,
-  ]);
+  const { rows } = await tx.query(
+    `SELECT id, status, total_paise,
+            -- cash was asked for and the hold ended less than CASH_GRACE_MINUTES ago
+            cash_requested_at IS NOT NULL AND expires_at > clock_timestamp() - make_interval(mins => $2) AS in_cash_grace
+       FROM orders WHERE id = $1 FOR UPDATE`,
+    [event.orderId, config.cashGraceMinutes],
+  );
   if (rows.length === 0) return "order_not_found";
   const order = rows[0];
 
   // Checked here, under the lock, not before: otherwise "approve" could read
   // pending_cash_approval, a "reject" could commit, and we would then pay a cancelled order.
   // Throwing rolls back the event row too, so nothing is logged.
-  if (options.requireStatus && order.status !== options.requireStatus) {
-    throw new HttpError(409, "WRONG_STATUS", `Order is ${order.status}, not ${options.requireStatus}`);
+  if (options.cashApproval) {
+    if (order.status === "paid" || order.status === "claimed") {
+      throw new HttpError(409, "ALREADY_PAID", "This order is already paid (UPI). Do not take cash; give it back if you did.");
+    }
+    // Waiting for cash, or it was waiting and the hold ran out only minutes ago (the customer
+    // handed the money over just in time). The late case goes through the late-payment rule below.
+    const waitingForCash = (order.status === "pending_cash_approval" || order.status === "expired") && order.in_cash_grace;
+    if (!waitingForCash) {
+      throw new HttpError(409, "NOT_AWAITING_CASH", `Order is ${order.status}, not waiting for cash`);
+    }
   }
 
   if (event.status !== "captured") return "ignored";
-  if (order.status === "paid" || order.status === "claimed") return "already_paid";
+  // Already paid by another payment: the customer paid twice. Keep the record (outcome
+  // "duplicate_payment") so the admin sees it under "Needs attention" and can refund it.
+  if (order.status === "paid" || order.status === "claimed") return "duplicate_payment";
   if (order.status === "needs_review") return "ignored";
 
   // Wrong amount: do not trust it, a person must look.

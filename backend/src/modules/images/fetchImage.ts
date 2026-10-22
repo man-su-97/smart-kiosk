@@ -1,5 +1,6 @@
-import { lookup } from "node:dns/promises";
-import { BlockList, isIP } from "node:net";
+import { lookup } from "node:dns";
+import { BlockList, isIP, type LookupFunction } from "node:net";
+import { Agent, fetch } from "undici";
 import { HttpError } from "../../errors.js";
 
 export const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // 8 MB
@@ -23,6 +24,23 @@ export function isPrivateAddress(address: string): boolean {
   return privateRanges.check(address, family === 4 ? "ipv4" : "ipv6");
 }
 
+// DNS lookup used for the actual connection. Checking the name once and then letting fetch look
+// it up again would leave a gap (DNS rebinding: "public" the first time, 127.0.0.1 the second).
+// Here the check and the connection use the same answer.
+export const publicOnlyLookup: LookupFunction = (hostname, options, callback) => {
+  lookup(hostname, { ...options, all: true }, (err, addresses) => {
+    if (err) return callback(err, "", 0);
+    const list = addresses as { address: string; family: number }[];
+    if (list.length === 0 || list.some((a) => isPrivateAddress(a.address))) {
+      return callback(Object.assign(new Error(`Blocked private address for ${hostname}`), { code: "EBLOCKED" }), "", 0);
+    }
+    if (options.all) return (callback as unknown as (e: null, a: typeof list) => void)(null, list);
+    callback(null, list[0].address, list[0].family);
+  });
+};
+
+const publicOnlyAgent = new Agent({ connect: { lookup: publicOnlyLookup } });
+
 // Download an image from a public https link, with limits on where, how long and how big.
 export async function fetchImage(rawUrl: string): Promise<Buffer> {
   let url: URL;
@@ -33,22 +51,28 @@ export async function fetchImage(rawUrl: string): Promise<Buffer> {
   }
   if (url.protocol !== "https:") throw new HttpError(400, "BAD_URL", "Only https:// links can be imported");
 
+  // Links written as an IP address never reach the DNS lookup above, so check them here.
+  // (Named hosts are also checked here first, only to give a clear message early.)
   const host = url.hostname.replace(/^\[|\]$/g, "");
-  const addresses = isIP(host) ? [{ address: host }] : await lookup(host, { all: true }).catch(() => []);
-  if (addresses.length === 0) throw new HttpError(400, "BAD_URL", "That website could not be found");
-  if (addresses.some((a) => isPrivateAddress(a.address))) {
+  if (isIP(host) ? isPrivateAddress(host) : host === "localhost" || host.endsWith(".localhost")) {
     throw new HttpError(400, "BAD_URL", "Links to private or local addresses are not allowed");
   }
 
-  let res: Response;
+  let res: Awaited<ReturnType<typeof fetch>>;
   try {
     res = await fetch(url, {
-      redirect: "error", // a redirect could point at a private address we did not check
+      dispatcher: publicOnlyAgent,
+      redirect: "error", // a redirect could point somewhere we did not check
       signal: AbortSignal.timeout(10_000),
       headers: { Accept: "image/*", "User-Agent": "SnackKioskImageImport/1.0" },
     });
-  } catch {
-    throw new HttpError(400, "DOWNLOAD_FAILED", "Could not download that link (it may redirect or be too slow)");
+  } catch (err) {
+    const blocked = String((err as { cause?: { code?: string } }).cause?.code) === "EBLOCKED";
+    throw new HttpError(
+      400,
+      blocked ? "BAD_URL" : "DOWNLOAD_FAILED",
+      blocked ? "Links to private or local addresses are not allowed" : "Could not download that link (it may redirect or be too slow)",
+    );
   }
   if (!res.ok) throw new HttpError(400, "DOWNLOAD_FAILED", `Could not download that link (HTTP ${res.status})`);
 

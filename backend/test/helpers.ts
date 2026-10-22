@@ -59,7 +59,8 @@ export function getProducts() {
 }
 
 export function claim(orderId: string) {
-  return fetch(`${serverUrl}/orders/${orderId}/pickup-claim`, { method: "POST" });
+  // The locker proves who it is with its key (LOCKER_KEY in vitest.config.ts).
+  return fetch(`${serverUrl}/orders/${orderId}/pickup-claim`, { method: "POST", headers: { "X-Locker-Key": process.env.LOCKER_KEY! } });
 }
 
 export function sendWebhook(

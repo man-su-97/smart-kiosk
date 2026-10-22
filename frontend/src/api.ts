@@ -13,6 +13,7 @@ export type Order = {
   status: "pending" | "pending_cash_approval" | "paid" | "expired" | "cancelled" | "needs_review" | "claimed";
   totalPaise: number;
   expiresInSeconds: number;
+  cashRequested?: boolean; // the customer chose "Pay with cash"
 };
 
 // What the customer put in the cart (kept in the browser; the server recalculates the real total).
@@ -26,6 +27,7 @@ export type CashRequest = {
   id: string;
   totalPaise: number;
   expiresInSeconds: number;
+  late: boolean; // the hold already ran out; staff can still approve for a few minutes
   items: { name: string; quantity: number }[];
 };
 

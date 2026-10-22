@@ -85,3 +85,16 @@ export const addShift = (body: { kioskId: number; userId: number; date: string; 
   request<{ id: number }>("/admin/shifts", sendJson("POST", body));
 export const deleteShift = (id: number) => request<null>(`/admin/shifts/${id}`, { method: "DELETE" });
 export const fetchMyShifts = () => request<Shift[]>("/staff/my-shifts");
+
+// Money problems for a person to sort out (paid twice, needs review).
+export type AttentionItem = {
+  kind: "paid_twice" | "needs_review";
+  orderId: string;
+  billNo: string;
+  amountPaise: number;
+  detail: string;
+  person: string | null;
+  kiosk: string | null;
+  at: string;
+};
+export const fetchAttention = () => request<AttentionItem[]>("/admin/attention");

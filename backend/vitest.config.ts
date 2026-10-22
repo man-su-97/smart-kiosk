@@ -11,6 +11,10 @@ export default defineConfig({
       WEBHOOK_SECRET: "test-secret",
       ENABLE_PAYMENT_SIMULATOR: "true",
       ADMIN_PASSWORD: "test-admin-password",
+      LOCKER_KEY: "test-locker-key",
+      // Off by default in tests (they place many orders from one address); the limiter has its own tests.
+      MAX_OPEN_HOLDS_PER_CLIENT: "0",
+      MAX_ORDERS_PER_CLIENT_PER_10_MIN: "0",
     },
   },
 });

@@ -22,7 +22,8 @@ Try the flow:
    ```
    The screen switches to "Payment Received". Repeating it with the same `eventId` changes nothing.
    The screen also has a **Simulate UPI Payment Success** button for the same thing.
-3. Collect from the "locker": `curl -X POST localhost:3000/orders/<orderId>/pickup-claim` (a second call returns 409).
+3. Collect from the "locker": `curl -X POST -H "X-Locker-Key: dev-locker-key" localhost:3000/orders/<orderId>/pickup-claim`
+   (a second call returns 409; without the locker key it is 401).
 
 The webhook secret is `WEBHOOK_SECRET` (`dev-webhook-secret` in `docker-compose.yml`).
 
@@ -177,18 +178,46 @@ Local logins (from `docker-compose.yml`): **admin** `admin@kiosk.local` / `admin
   Locally the sample staff log in with `demo12345` (e.g. `priya.demo@kiosk.local`); elsewhere they get random passwords.
 - Not built: password reset, editing a shift (remove and add it again), and per-kiosk reports.
 
+## Security & business-loss checks
+
+`e2e/tests/loopholes.spec.ts` (Playwright) tries each of these the way a dishonest customer, staff member or outsider would,
+and asserts the safe outcome; `backend/test/protections.test.ts` covers the same at API level. Before the fixes, 7 of them
+succeeded (marked ✘ before). For each fix, removing it makes its test fail again.
+
+| # | Attack (how money or stock could be lost) | Protection | Before |
+|---|---|---|---|
+| L1 | Pay for free through the mock UPI page | Simulator off in production unless `ALLOW_SIMULATOR_IN_PRODUCTION=true` (demo; logs a warning) | ✘ |
+| L2 | Someone who saw an order id on screen opens its locker | Pickup claim needs `X-Locker-Key` (`LOCKER_KEY`), constant-time compare | ✘ |
+| L3 | A script orders in a loop until everything shows "Sold out" | Per IP: max open unpaid holds (`MAX_OPEN_HOLDS_PER_CLIENT`, 5) and orders per 10 min (`MAX_ORDERS_PER_CLIENT_PER_10_MIN`, 40) → 429; a per-IP database lock makes parallel requests take turns | ✘ |
+| L4 | Dodge the 50-per-product limit by repeating a line | Limit checked after lines are added up | ✘ |
+| L5 | Customer pays twice (UPI + cash, or two payments): money silently kept | Recorded as `duplicate_payment`; Dashboard **Needs attention** lists it for a refund; staff get "already paid (UPI), do not take cash" | ✘ |
+| L6 | Cash handed over just before the hold ends cannot be recorded (cash in drawer, no sale) | Staff can approve for `CASH_GRACE_MINUTES` (10) after expiry, marked "Late"; the late-payment rule decides; the kiosk keeps waiting and unlocks | ✘ |
+| L7 | Image import used to reach internal services (incl. DNS rebinding) | https only, private addresses refused **in the same DNS lookup that connects**, no redirects, 10 s / 8 MB limits | partly |
+| L8 | Customer sends their own price or total | Ignored; prices come from the database | ✔ |
+| L9 | Hidden products, 0 / negative / fractional quantities | Refused | ✔ |
+| L10 | Stock edited below what customers already hold | 409 | ✔ |
+| L11 | Forged, replayed or underpaid webhooks | 401 / processed once / `needs_review` | ✔ |
+| L12 | Staff opening admin data | 403 | ✔ |
+| L13 | Two lockers, or approve + reject, at the same moment | Exactly one wins (row locks) | ✔ |
+| L14 | Another website switches a customer's order to cash with a hidden form | Cash request accepts JSON only (415 otherwise) | ✘ |
+| L15 | Sample data mixed into a real shop's reports | `SEED_DEMO_DATA` only fills a database with no real sales | ✘ |
+
+Still open (known): limits are per IP (all kiosks behind one router share them, so the defaults are generous), the
+login and order limits do not persist across restarts of several servers, there are no database timeouts, and
+`needs_review` / "Paid twice" items are listed but have no refund button yet.
+
 ## What I would do next
 
-- Refund / resolution screen for `needs_review` orders, and flag a second payment for an already-paid order.
-- Let staff approve cash that arrives just after the hold expired (today it is refused once the order shows expired).
-- Rate-limit `POST /orders` (a script can keep stock held) and cap total quantity per product after merging lines.
+- A refund / resolution flow for "Needs attention" items (today they are listed, then handled outside the app).
+- Authenticate kiosk devices (so limits are per device, not per IP) and lockers per locker instead of one shared key.
 - Database timeouts (connection, statement, lock).
-- Production frontend build, authentication for lockers, and tests with several API instances.
+- Tests with several API instances.
 
 ## How I checked it
 
-- 80 backend tests and 20 browser tests pass, also from a fresh `docker compose down -v && docker compose up --build`,
-  and the browser tests also pass against the production image (root `Dockerfile`, `NODE_ENV=production`).
+- 93 backend tests and 35 browser tests pass (one browser test, L1, only runs against a production build), also from a
+  fresh `docker compose down -v && docker compose up --build`, and against the production image (root `Dockerfile`,
+  `NODE_ENV=production`): with the simulator opted in (demo) all pass; without the opt-in, L1 proves free payment is refused.
 - The tests can fail: removing `FOR UPDATE` from `createOrder` makes the race tests fail (9 orders for 2 units), and
   the deadline test fails against the earlier webhook code. Likewise for the portal: removing the locked status check,
   the stock-vs-held rule, or the India time zone each makes its test fail.

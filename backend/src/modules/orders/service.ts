@@ -1,20 +1,50 @@
-import { withTransaction, pool } from "../../db/db.js";
+import { withTransaction, pool, type Tx } from "../../db/db.js";
 import { config } from "../../config.js";
 import { HttpError } from "../../errors.js";
 import { getHeldUnits } from "../products/service.js";
 
 type Item = { productId: number; quantity: number };
 
-export async function createOrder(requested: Item[], kioskCode?: string) {
+const MAX_PER_PRODUCT = 50;
+
+// Stops one client (e.g. a script) holding all the stock so real customers see "Sold out".
+// The advisory lock makes requests from the same IP take turns, so ten at once cannot all
+// pass the count before any of them is saved. 0 in config = no limit.
+async function checkClientLimits(tx: Tx, clientIp: string) {
+  if (!config.maxOpenHoldsPerClient && !config.maxOrdersPerClientPer10Min) return;
+  await tx.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`orders:${clientIp}`]);
+  const { rows } = await tx.query(
+    `SELECT count(*) FILTER (WHERE status IN ('pending', 'pending_cash_approval') AND expires_at > clock_timestamp()) AS open_holds,
+            count(*) FILTER (WHERE created_at > now() - interval '10 minutes') AS recent
+       FROM orders WHERE client_ip = $1`,
+    [clientIp],
+  );
+  const openHolds = Number(rows[0].open_holds);
+  const recent = Number(rows[0].recent);
+  if (config.maxOpenHoldsPerClient && openHolds >= config.maxOpenHoldsPerClient) {
+    throw new HttpError(429, "TOO_MANY_OPEN_ORDERS", "Too many unpaid orders from this device. Pay or wait for one to expire.");
+  }
+  if (config.maxOrdersPerClientPer10Min && recent >= config.maxOrdersPerClientPer10Min) {
+    throw new HttpError(429, "TOO_MANY_ORDERS", "Too many orders from this device. Please try again in a few minutes.");
+  }
+}
+
+export async function createOrder(requested: Item[], kioskCode?: string, clientIp = "unknown") {
   // If the same product appears twice, add the quantities together.
   const wanted = new Map<number, number>();
   for (const { productId, quantity } of requested) {
     wanted.set(productId, (wanted.get(productId) ?? 0) + quantity);
   }
+  // The 50 limit is per product, so it also applies after repeated lines are added up.
+  for (const quantity of wanted.values()) {
+    if (quantity > MAX_PER_PRODUCT) throw new HttpError(400, "TOO_MANY", `At most ${MAX_PER_PRODUCT} of one product per order`);
+  }
   // Sorted so every transaction locks products in the same order (no deadlocks).
   const productIds = [...wanted.keys()].sort((a, b) => a - b);
 
   const orderId = await withTransaction(async (tx) => {
+    await checkClientLimits(tx, clientIp);
+
     // Lock the product rows. A second buyer of the same product waits here until
     // we commit, then sees our hold when it counts. This is what stops overselling.
     const { rows: products } = await tx.query(
@@ -58,10 +88,10 @@ export async function createOrder(requested: Item[], kioskCode?: string) {
     }
 
     const { rows } = await tx.query(
-      `INSERT INTO orders (status, total_paise, expires_at, kiosk_id, agent_user_id)
-       VALUES ('pending', $1, clock_timestamp() + make_interval(secs => $2), $3, $4)
+      `INSERT INTO orders (status, total_paise, expires_at, kiosk_id, agent_user_id, client_ip)
+       VALUES ('pending', $1, clock_timestamp() + make_interval(secs => $2), $3, $4, $5)
        RETURNING id`,
-      [totalPaise, config.holdSeconds, kiosk.id, kiosk.agent_user_id],
+      [totalPaise, config.holdSeconds, kiosk.id, kiosk.agent_user_id, clientIp],
     );
     const id: string = rows[0].id;
     for (const p of products) {
@@ -90,7 +120,8 @@ export async function getOrder(id: string) {
                  THEN 'expired' ELSE status END AS status,
             CASE WHEN status IN ('pending', 'pending_cash_approval')
                  THEN GREATEST(0, CEIL(EXTRACT(EPOCH FROM (expires_at - clock_timestamp()))))::int
-                 ELSE 0 END AS "expiresInSeconds"
+                 ELSE 0 END AS "expiresInSeconds",
+            cash_requested_at IS NOT NULL AS "cashRequested"
        FROM orders WHERE id = $1`,
     [id],
   );
@@ -102,7 +133,7 @@ export async function getOrder(id: string) {
 // Only a pending order inside its window can switch; asking twice is harmless.
 export async function requestCash(id: string) {
   const { rowCount } = await pool.query(
-    `UPDATE orders SET status = 'pending_cash_approval'
+    `UPDATE orders SET status = 'pending_cash_approval', cash_requested_at = now()
       WHERE id = $1 AND status = 'pending' AND expires_at > clock_timestamp()`,
     [id],
   );

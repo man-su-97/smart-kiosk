@@ -144,6 +144,12 @@ export async function seedDemoData({ days = 7, staffPassword }: { days?: number;
   });
 }
 
+// Real (not sample) payments exist: sample data must not be mixed into a real shop's reports.
+export async function hasRealSales() {
+  const { rows } = await pool.query("SELECT 1 FROM payment_events WHERE event_id NOT LIKE 'demo\\_%' LIMIT 1");
+  return rows.length > 0;
+}
+
 export async function hasDemoData() {
   const { rows } = await pool.query("SELECT 1 FROM payment_events WHERE event_id LIKE 'demo\\_%' LIMIT 1");
   return rows.length > 0;

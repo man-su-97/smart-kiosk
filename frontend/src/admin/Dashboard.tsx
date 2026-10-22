@@ -12,6 +12,7 @@ import {
   type TopProduct,
 } from "./adminApi";
 import { todayInIndia } from "./format";
+import { NeedsAttention } from "./NeedsAttention";
 
 type Data = { summary: Summary; daily: DailyRow[]; categories: CategoryRow[]; top: TopProduct[] };
 
@@ -46,6 +47,8 @@ export function Dashboard() {
           ))}
         </div>
       </div>
+
+      <NeedsAttention />
 
       <div className="grid grid-cols-2 gap-3.5 md:grid-cols-4">
         <Kpi label="Revenue" value={formatRupees(summary.revenuePaise)} />

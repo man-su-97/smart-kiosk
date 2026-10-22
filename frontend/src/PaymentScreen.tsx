@@ -40,7 +40,10 @@ export function PaymentScreen({ firstOrder, lines, onDone }: Props) {
   const [copied, setCopied] = useState(false);
   const [actionError, setActionError] = useState("");
   const secondsLeft = useCountdown(order.expiresInSeconds);
-  const finished = FINISHED.includes(order.status);
+  // A cash order that just expired is not finished yet: staff may still confirm cash that was
+  // handed over in time, so keep asking the server and unlock the locker if they do.
+  const waitingForLateCash = order.status === "expired" && Boolean(order.cashRequested);
+  const finished = FINISHED.includes(order.status) && !waitingForLateCash;
   const command = `npm run send-webhook -- ${order.id} ${order.totalPaise}`;
 
   // Ask the server for the status every 2 seconds until the order is finished.
@@ -101,7 +104,11 @@ export function PaymentScreen({ firstOrder, lines, onDone }: Props) {
   if (order.status === "expired") {
     return (
       <Ending tone="bad" icon="⌛" title="Time ran out" onDone={onDone}>
-        <p>Your items were released. Please start a new order.</p>
+        {waitingForLateCash ? (
+          <p>If you already paid cash at the counter, please wait here: staff can still confirm it and this screen will update.</p>
+        ) : (
+          <p>Your items were released. Please start a new order.</p>
+        )}
       </Ending>
     );
   }

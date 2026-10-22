@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { requireRole } from "../../auth.js";
-import { byCategory, daily, summary, topProducts } from "./service.js";
+import { byCategory, daily, needsAttention, summary, topProducts } from "./service.js";
 import { writeDailyReport } from "./pdf.js";
 
 // Analytics and reports: admins only.
@@ -32,6 +32,10 @@ reportsRouter.get("/admin/analytics/categories", requireRole("admin"), async (re
 
 reportsRouter.get("/admin/analytics/top-products", requireRole("admin"), async (req, res) => {
   res.json(await topProducts(rangeSchema.parse(req.query)));
+});
+
+reportsRouter.get("/admin/attention", requireRole("admin"), async (_req, res) => {
+  res.json(await needsAttention());
 });
 
 reportsRouter.get("/admin/reports/daily-pdf", requireRole("admin"), async (req, res) => {

@@ -187,3 +187,37 @@ export async function bills(range: Range): Promise<Bill[]> {
     demo: typeof r.event_id === "string" && r.event_id.startsWith("demo_"),
   }));
 }
+
+// Money problems a person must sort out, newest first:
+//   - "Paid twice": a second payment arrived for an order that was already paid -> refund it.
+//   - "Needs review": wrong amount, or paid after the items were sold to someone else -> refund or fix.
+export async function needsAttention() {
+  const { rows } = await pool.query(
+    `SELECT * FROM (
+       SELECT 'paid_twice' AS kind, o.id AS "orderId", o.bill_no, pe.amount_paise AS amount,
+              CASE pe.source WHEN 'cash' THEN 'cash' ELSE 'UPI' END AS detail,
+              COALESCE(u.name, u.email) AS person, pe.received_at AS at, k.code AS kiosk
+         FROM payment_events pe
+         JOIN orders o ON o.id = pe.order_id
+         LEFT JOIN users u ON u.id = pe.operator_id
+         LEFT JOIN kiosks k ON k.id = o.kiosk_id
+        WHERE pe.outcome = 'duplicate_payment'
+       UNION ALL
+       SELECT 'needs_review', o.id, o.bill_no, o.total_paise, COALESCE(o.review_reason, ''), NULL, COALESCE(o.paid_at, o.created_at), k.code
+         FROM orders o LEFT JOIN kiosks k ON k.id = o.kiosk_id
+        WHERE o.status = 'needs_review'
+     ) problems
+     ORDER BY at DESC
+     LIMIT 50`,
+  );
+  return rows.map((r) => ({
+    kind: r.kind as "paid_twice" | "needs_review",
+    orderId: r.orderId as string,
+    billNo: `BILL-${String(r.bill_no).padStart(6, "0")}`,
+    amountPaise: num(r.amount),
+    detail: r.detail as string, // payment method, or the review reason
+    person: (r.person as string | null) ?? null,
+    kiosk: (r.kiosk as string | null) ?? null,
+    at: r.at as string,
+  }));
+}

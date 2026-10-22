@@ -22,8 +22,14 @@ export function MockPayPage() {
     setState("paying");
     try {
       const { result } = await mockUpiPay(orderId);
-      setState(result === "paid" || result === "duplicate" || result === "already_paid" ? "done" : "error");
-      setMessage(result === "needs_review" ? "Payment needs a staff check." : "");
+      setState(result === "paid" || result === "duplicate" ? "done" : "error");
+      setMessage(
+        result === "needs_review"
+          ? "Payment needs a staff check."
+          : result === "duplicate_payment"
+            ? "This order was already paid. This second payment is flagged for a refund."
+            : "",
+      );
     } catch (e) {
       setState("error");
       setMessage((e as Error).message);

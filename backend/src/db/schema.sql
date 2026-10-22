@@ -144,3 +144,11 @@ WITH base AS (SELECT COALESCE(MAX(bill_no), 0) AS last FROM orders),
 UPDATE orders SET bill_no = base.last + todo.n FROM base, todo WHERE orders.id = todo.id;
 SELECT setval('orders_bill_no_seq', COALESCE((SELECT MAX(bill_no) FROM orders), 0) + 1, false); -- next number
 CREATE UNIQUE INDEX IF NOT EXISTS orders_bill_no_key ON orders (bill_no);
+
+-- ---------------------------------------------------------------------------
+-- Abuse and cash-handling protections.
+-- Who placed the order (IP), so one client cannot hold all the stock.
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS client_ip TEXT;
+CREATE INDEX IF NOT EXISTS orders_open_holds_by_client ON orders (client_ip) WHERE status IN ('pending', 'pending_cash_approval');
+-- When the customer chose cash (lets staff still approve cash handed over just before the hold ran out).
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS cash_requested_at TIMESTAMPTZ;

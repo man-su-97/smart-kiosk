@@ -9,6 +9,13 @@ function secret(name: string, devDefault: string): string {
   return devDefault;
 }
 
+// The mock-UPI simulator lets anyone mark an order paid (free goods), so it is off in production
+// unless a demo deployment explicitly opts in.
+export function paymentSimulatorAllowed(env: NodeJS.ProcessEnv): boolean {
+  if (env.ENABLE_PAYMENT_SIMULATOR !== "true") return false;
+  return env.NODE_ENV !== "production" || env.ALLOW_SIMULATOR_IN_PRODUCTION === "true";
+}
+
 // All settings come from environment variables, with defaults that work for local dev.
 export const config = {
   isProduction,
@@ -17,9 +24,17 @@ export const config = {
     process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/pickup",
   // Shared secret between us and the (simulated) payment provider.
   webhookSecret: secret("WEBHOOK_SECRET", "dev-webhook-secret"),
-  // Demo only: lets the phone "mock UPI" page mark an order paid. A real bank would call the
-  // signed webhook instead; an open "mark as paid" endpoint must never be on in production.
-  paymentSimulator: process.env.ENABLE_PAYMENT_SIMULATOR === "true",
+  // Demo only: lets the phone "mock UPI" page mark an order paid (anyone can call it: free goods).
+  // Off in production unless a demo deployment opts in with ALLOW_SIMULATOR_IN_PRODUCTION=true.
+  paymentSimulator: paymentSimulatorAllowed(process.env),
+  // The locker controller sends this in X-Locker-Key; without it anyone knowing an order id could open the locker.
+  lockerKey: secret("LOCKER_KEY", "dev-locker-key"),
+  // Stops one client (a script) holding all the stock: open unpaid holds and orders per 10 minutes,
+  // per IP address. 0 = no limit.
+  maxOpenHoldsPerClient: Number(process.env.MAX_OPEN_HOLDS_PER_CLIENT ?? 5),
+  maxOrdersPerClientPer10Min: Number(process.env.MAX_ORDERS_PER_CLIENT_PER_10_MIN ?? 40),
+  // Cash handed over just before the hold ran out can still be approved for this long afterwards.
+  cashGraceMinutes: Number(process.env.CASH_GRACE_MINUTES ?? 10),
   // First admin account, created at start when there are no users yet.
   adminEmail: process.env.ADMIN_EMAIL ?? "admin@kiosk.local",
   adminPassword: secret("ADMIN_PASSWORD", "admin12345"),

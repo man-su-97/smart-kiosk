@@ -28,6 +28,10 @@ services:
       STAFF_EMAIL: staff@kiosk.local
       STAFF_PASSWORD: staff12345
       DEMO_STAFF_PASSWORD: demo12345   # sample staff from `npm run seed-demo` (local only)
+      LOCKER_KEY: dev-locker-key       # the locker sends this as X-Locker-Key to claim an order
+      # Per-device limits against stock hoarding (defaults 5 / 40); looser here for the test suites.
+      MAX_OPEN_HOLDS_PER_CLIENT: "8"
+      MAX_ORDERS_PER_CLIENT_PER_10_MIN: "300"
     ports:
       - "3000:3000"
     depends_on:

@@ -2,13 +2,14 @@ import { createApp } from "./app.js";
 import { config } from "./config.js";
 import { migrate, seed, pool } from "./db/db.js";
 import { seedUsers } from "./modules/auth/service.js";
-import { hasDemoData, seedDemoData } from "./modules/demo/seedDemo.js";
+import { hasDemoData, hasRealSales, seedDemoData } from "./modules/demo/seedDemo.js";
 
 await migrate();
 await seed();
 await seedUsers();
-// Optional: fill an empty demo deployment with sample data (SEED_DEMO_DATA=true). Only once.
-if (process.env.SEED_DEMO_DATA === "true" && !(await hasDemoData())) {
+// Optional: fill an empty demo deployment with sample data (SEED_DEMO_DATA=true). Only once, and
+// never into a database that already has real sales (fake sales must not end up in real reports).
+if (process.env.SEED_DEMO_DATA === "true" && !(await hasDemoData()) && !(await hasRealSales())) {
   await seedDemoData({ staffPassword: process.env.DEMO_STAFF_PASSWORD });
 }
 
@@ -20,5 +21,9 @@ setInterval(() => {
     .catch((err) => console.error("expiry job failed", err));
   pool.query("DELETE FROM sessions WHERE expires_at <= now()").catch((err) => console.error("session cleanup failed", err));
 }, 5000);
+
+if (config.paymentSimulator && config.isProduction) {
+  console.warn("WARNING: payment simulator is ON in production: anyone can mark orders paid. Demo use only.");
+}
 
 createApp().listen(config.port, () => console.log(`API listening on :${config.port}`));

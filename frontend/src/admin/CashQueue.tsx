@@ -48,7 +48,14 @@ export function CashQueue() {
           <div key={r.id} data-testid="cash-request" className="card flex animate-pop flex-wrap items-center justify-between gap-4">
             <div>
               <div className="text-[28px] font-extrabold">{formatRupees(r.totalPaise)}</div>
-              <div className="text-[13px] text-muted">Order {r.id.slice(0, 8)} · {r.expiresInSeconds}s left</div>
+              <div className="text-[13px] text-muted">
+                Order {r.id.slice(0, 8)} ·{" "}
+                {r.late ? (
+                  <span className="rounded-full bg-[#fff1cf] px-2 py-0.5 font-bold text-[#8a5a00]">Late: approve only if the cash was handed over in time</span>
+                ) : (
+                  `${r.expiresInSeconds}s left`
+                )}
+              </div>
               <div>{r.items.map((i) => `${i.quantity} × ${i.name}`).join(", ")}</div>
             </div>
             <div className="flex gap-2.5">

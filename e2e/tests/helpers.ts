@@ -25,7 +25,9 @@ export async function expireOrder(orderId: string) {
 }
 
 export const getProducts = () => fetch(`${API}/products`).then((r) => r.json() as Promise<any[]>);
-export const claimPickup = (orderId: string) => fetch(`${API}/orders/${orderId}/pickup-claim`, { method: "POST" });
+// The locker proves who it is with its key (LOCKER_KEY in docker-compose.yml).
+export const claimPickup = (orderId: string) =>
+  fetch(`${API}/orders/${orderId}/pickup-claim`, { method: "POST", headers: { "X-Locker-Key": process.env.LOCKER_KEY ?? "dev-locker-key" } });
 
 // Demo accounts from docker-compose.yml.
 export const ACCOUNTS = {
