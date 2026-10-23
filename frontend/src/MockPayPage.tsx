@@ -36,7 +36,7 @@ export function MockPayPage() {
     <div className="grid min-h-screen place-items-center bg-gradient-to-br from-[#5b4bdb] to-[#2a1f7a] p-4">
       <div className="w-full max-w-[380px] rounded-[28px] bg-white px-[22px] py-7 text-center shadow-[0_20px_50px_rgba(0,0,0,0.3)]">
         <div className="text-xl font-extrabold text-[#5b4bdb]">Mock UPI</div>
-        <p className="text-muted">Demo payment page — no real money moves.</p>
+        <p className="text-muted">Demo payment page. No real money moves.</p>
         {order && (
           <>
             <p className="mt-3 text-muted">Paying to</p>

@@ -84,7 +84,7 @@ export function PaymentScreen({ firstOrder, lines, onDone }: Props) {
           Payment Received
         </h1>
         <p className="mt-1.5 mb-6 animate-pop text-lg [animation-delay:0.4s] [animation-fill-mode:backwards]">
-          <strong>Locker Unlocked</strong> — collect your order from the locker.
+          <strong>Locker Unlocked</strong>. Collect your order from the locker.
         </p>
         <button className="btn btn-primary" onClick={onDone}>Done</button>
       </div>
@@ -173,7 +173,7 @@ export function PaymentScreen({ firstOrder, lines, onDone }: Props) {
                 <QRCodeSVG value={mockPayLink(order)} size={200} marginSize={2} />
               </div>
               <p className="mt-3 mb-1 text-lg font-bold">Scan with your phone camera</p>
-              <p className="text-[13px] text-muted">Opens a demo UPI page — no real money moves.</p>
+              <p className="text-[13px] text-muted">Opens a demo UPI page. No real money moves.</p>
               <div className="mt-3.5 flex w-full flex-col items-center gap-2 rounded-[18px] border-2 border-dashed border-line p-3">
                 <small>Testing without a phone</small>
                 <button className="btn btn-primary" onClick={() => run(() => mockUpiPay(order.id))}>

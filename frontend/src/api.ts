@@ -22,7 +22,8 @@ export type CashRequest = {
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, options);
-  const data = await res.json();
+  // A proxy error (API down or restarting) has no JSON body; show a plain message, not a parse error.
+  const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.message ?? "Request failed");
   return data;
 }
