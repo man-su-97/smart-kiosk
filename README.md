@@ -2,6 +2,12 @@
 
 Snack counter: pick items, pay by UPI (simulated), collect from a locker. Express, PostgreSQL, React (Vite), TypeScript.
 
+| Choose products | Cart |
+|---|---|
+| ![Products with available units](docs/screenshots/1-products.png) | ![Cart](docs/screenshots/2-cart.png) |
+| **Pay (2-minute hold countdown)** | **Paid: locker unlocked** |
+| ![Payment screen with countdown](docs/screenshots/3-payment.png) | ![Payment received](docs/screenshots/4-paid.png) |
+
 ## Setup
 
 Requires Docker.
