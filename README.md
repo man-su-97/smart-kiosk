@@ -10,7 +10,7 @@ Snack counter: pick items, pay by UPI (simulated), collect from a locker. Expres
 
 ## Setup
 
-Requires Docker.
+Requires Docker, and Node.js 20+ for the webhook script and tests.
 
 ```bash
 git clone https://github.com/man-su-97/smart-kiosk.git
